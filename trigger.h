@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cinttypes>
 #include <string>
 #include <map>
 
@@ -32,9 +33,10 @@ public:
     Trigger(FileRequestCb *cb);
 
     /* Executes the given command while hooking its file accesses. */
-    int Execute(const char *filename, char *const argv[], char *const envp[]);
+    int Execute(const char *filename, char *const argv[]);
 
 private:
     std::map<FilePath, RequestedFileStatus> m_fileStatus;
     FileRequestCb *m_cb;
+    uint64_t m_child_idx;
 };

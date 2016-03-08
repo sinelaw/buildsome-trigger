@@ -10,20 +10,19 @@ extern "C" {
 #include <sys/wait.h>
 #include <unistd.h>
 #include <errno.h>
+
+#include "fshook/protocol.h"
 }
 #include <cstdlib>
 #include <cinttypes>
 #include <sstream>
 #include <iostream>
 
-#define LD_PRELOAD_PATH "./fs_override.so"
+#define MIN(x,y) (x < y ? x : y)
 
-#define ASSERT(x)  do { if (!(x)) { PANIC("ASSERTION FAILED at %s:%d: " #x, __FILE__, __LINE__); } } while(0)
-#define PANIC(fmt, ...) do {                                            \
-        perror("FATAL ERROR: errno");                                   \
-        fprintf(stderr, "FATAL ERROR: " fmt "\n", ##__VA_ARGS__);       \
-        abort();                                                        \
-    } while (0)
+
+#define PROTOCOL_HELLO "PROTOCOL10: HELLO, I AM: "
+#define LD_PRELOAD_PATH "./fs_override.so"
 
 Trigger::Trigger(FileRequestCb *cb) {
     m_cb = cb;
@@ -57,7 +56,65 @@ static int trigger_listen(const char *addr, struct sockaddr_un *out_addr) {
     return fd;
 }
 
-static void trigger_accept(int fd, const struct sockaddr_un *addr) {
+static void send_go(int connection_fd) {
+    send(connection_fd, "GO", 2, 0);
+}
+
+static bool recv_buf(int connection_fd, char *buf, uint32_t buf_size, uint32_t *out_received)
+{
+    uint32_t size_n;
+    int received = recv(connection_fd, &size_n, sizeof(size_n), 0);
+    if (received <= 0) return false;
+    if ((uint32_t)received < sizeof(size_n)) return false;
+    const uint32_t size = htonl(size_n);
+    *out_received = size;
+    if (size == 0) return true;
+
+    // std::cout << "recv size: " << size << std::endl;
+    ASSERT(buf_size > size);
+    received = recv(connection_fd, buf, size, 0);
+    if (received < 0) return false;
+    if ((uint32_t)received != size) return false;
+    return true;
+}
+
+static void debug_req(enum func func_id, bool delayed, const char *pos, uint32_t str_size)
+{
+    const char *name;
+    switch (func_id) {
+    case func_openr: name = "openr"; break;
+    case func_openw: name = "openw"; break;
+    case func_creat: name = "creat"; break;
+    case func_stat: name = "stat"; break;
+    case func_lstat: name = "lstat"; break;
+    case func_opendir: name = "opendir"; break;
+    case func_access: name = "access"; break;
+    case func_truncate: name = "truncate"; break;
+    case func_unlink: name = "unlink"; break;
+    case func_rename: name = "rename"; break;
+    case func_chmod: name = "chmod"; break;
+    case func_readlink: name = "readlink"; break;
+    case func_mknod: name = "mknod"; break;
+    case func_mkdir: name = "mkdir"; break;
+    case func_rmdir: name = "rmdir"; break;
+    case func_symlink: name = "symlink"; break;
+    case func_link: name = "link"; break;
+    case func_chown: name = "chown"; break;
+    case func_exec: name = "exec"; break;
+    case func_execp: name = "execp"; break;
+    case func_realpath: name = "realpath"; break;
+    case func_trace: name ="trace"; break;
+    default: PANIC("Invalid func_id: %u", func_id);
+    }
+
+    std::cout
+        << "recv: delayed=" << (delayed ? "yes" : "no")
+        << ", func=" << name
+        << ", buf(" << str_size << ")=" << pos << std::endl;
+
+}
+
+static void trigger_accept(int fd, const struct sockaddr_un *addr, FileRequestCb *cb) {
     int connection_fd;
     socklen_t addrlen;
     while ((connection_fd = accept(fd,
@@ -66,6 +123,34 @@ static void trigger_accept(int fd, const struct sockaddr_un *addr) {
     {
         // HANDLE CONNECTION
         std::cout << getpid() << ": got connection" << std::endl;
+
+        bool first = true;
+        while (true) {
+
+            char buf[4096];
+            uint32_t size;
+            if (!recv_buf(connection_fd, buf, sizeof(buf), &size)) break;
+
+            if (first) {
+                if (0 != strncmp(PROTOCOL_HELLO, buf, MIN(size, strlen(PROTOCOL_HELLO)))) {
+                    PANIC("Exepcting HELLO message, got: %s", buf);
+                }
+                first = false;
+            } else {
+                char *pos = buf;
+                bool delayed = 0 != *pos;
+                pos += 1;
+                enum func func_id = *(enum func *)pos;
+                pos += sizeof(uint32_t);
+                const uint32_t str_size = size - 1 - sizeof(uint32_t);
+                debug_req(func_id, delayed, pos, str_size);
+
+                if (delayed) {
+                    cb(func_id, pos, str_size);
+                }
+            }
+            send_go(connection_fd);
+        }
 
         close(connection_fd);
         return;
@@ -115,9 +200,7 @@ int Trigger::Execute(const char *filename, char *const argv[])
 
     std::cout << "forked child: " << child << std::endl;
 
-    if (fork() == 0) {
-        trigger_accept(sock_fd, &addr);
-    }
+    trigger_accept(sock_fd, &addr, m_cb);
 
     return wait_all(child);
 }

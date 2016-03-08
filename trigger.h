@@ -4,11 +4,23 @@
 #include <string>
 #include <map>
 
+extern "C" {
+#include "fshook/protocol.h"
+}
+
+#define ASSERT(x)  do { if (!(x)) { PANIC("ASSERTION FAILED at %s:%d: " #x, __FILE__, __LINE__); } } while(0)
+#define PANIC(fmt, ...) do {                                            \
+        perror("FATAL ERROR: errno");                                   \
+        fprintf(stderr, "FATAL ERROR: " fmt "\n", ##__VA_ARGS__);       \
+        abort();                                                        \
+    } while (0)
+
+
 /* Request for a file to be built. After the callback returns, file
  * access functions will be allowed to execute.
  *
  * Executed at most once per filename. */
-typedef void FileRequestCb(const char *filename);
+typedef void FileRequestCb(enum func func_id, const char *buf, uint32_t buf_size);
 
 typedef std::string FilePath;
 

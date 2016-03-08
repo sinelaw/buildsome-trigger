@@ -1,1 +1,14 @@
-*.o
+# AUTO GENERATED FILE - DO NOT EDIT
+# If you need to ignore files not managed by buildsome, add to .gitignore-base
+/Buildsome.mk.db
+/.gitignore
+/out
+/out/build_rules.o
+/out/debug.o
+/out/fs_override.so
+/out/fs_tree.o
+/out/job.o
+/out/main
+/out/main.o
+/out/test_build_rules
+/out/test_fs_tree

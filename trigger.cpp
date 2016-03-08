@@ -114,6 +114,32 @@ static void debug_req(enum func func_id, bool delayed, const char *pos, uint32_t
 
 }
 
+static void handle_connection(int connection_fd, FileRequestCb *cb) {
+    char buf[4096];
+    uint32_t size;
+    if (!recv_buf(connection_fd, buf, sizeof(buf), &size)) return;
+    if (0 != strncmp(PROTOCOL_HELLO, buf, MIN(size, strlen(PROTOCOL_HELLO)))) {
+        PANIC("Exepcting HELLO message, got: %s", buf);
+    }
+    send_go(connection_fd);
+
+    while (true) {
+        if (!recv_buf(connection_fd, buf, sizeof(buf), &size)) break;
+        char *pos = buf;
+        bool delayed = 0 != *pos;
+        pos += 1;
+        enum func func_id = *(enum func *)pos;
+        pos += sizeof(uint32_t);
+        const uint32_t str_size = size - 1 - sizeof(uint32_t);
+        debug_req(func_id, delayed, pos, str_size);
+
+        if (delayed) {
+            cb(func_id, pos, str_size);
+        }
+        send_go(connection_fd);
+    }
+}
+
 static void trigger_accept(int fd, const struct sockaddr_un *addr, FileRequestCb *cb) {
     int connection_fd;
     socklen_t addrlen;
@@ -124,36 +150,10 @@ static void trigger_accept(int fd, const struct sockaddr_un *addr, FileRequestCb
         // HANDLE CONNECTION
         std::cout << getpid() << ": got connection" << std::endl;
 
-        bool first = true;
-        while (true) {
-
-            char buf[4096];
-            uint32_t size;
-            if (!recv_buf(connection_fd, buf, sizeof(buf), &size)) break;
-
-            if (first) {
-                if (0 != strncmp(PROTOCOL_HELLO, buf, MIN(size, strlen(PROTOCOL_HELLO)))) {
-                    PANIC("Exepcting HELLO message, got: %s", buf);
-                }
-                first = false;
-            } else {
-                char *pos = buf;
-                bool delayed = 0 != *pos;
-                pos += 1;
-                enum func func_id = *(enum func *)pos;
-                pos += sizeof(uint32_t);
-                const uint32_t str_size = size - 1 - sizeof(uint32_t);
-                debug_req(func_id, delayed, pos, str_size);
-
-                if (delayed) {
-                    cb(func_id, pos, str_size);
-                }
-            }
-            send_go(connection_fd);
+        if (0 == fork()) {
+            handle_connection(connection_fd, cb);
+            close(connection_fd);
         }
-
-        close(connection_fd);
-        return;
     }
 }
 

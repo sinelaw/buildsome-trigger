@@ -4,8 +4,9 @@ default: trigger.o fs_override.so trigger
 clean:
 	rm *.o trigger fs_override.so
 
-CXX=g++-5 -g3 -Wall -Werror -Wextra -std=c++11
-CC=gcc -g3 -Wall -Werror -Wextra
+WARNINGS=-Wswitch-enum -Wall -Werror -Wextra
+CXX=g++ -g -no-pie ${WARNINGS} -std=c++11 -pthread
+CC=gcc -g -no-pie ${WARNINGS} -std=gnu11
 
 trigger: main.cpp trigger.o
 	${CXX} $^ -o "$@"

@@ -4,12 +4,11 @@
 #include <iostream>
 
 extern "C" {
+#include <signal.h>
 #include "fshook/protocol.h"
 }
 
-#define DEFINE_DATA(type, buf, buf_size, name)  \
-    ASSERT(buf_size == sizeof(type));           \
-    type *name __attribute__((unused)) = (type *)buf;
+static Trigger *trigger;
 
 void file_request(enum func func, const char *buf, uint32_t buf_size) {
     // std::cout << "HANDLING: " << buf << std::endl;
@@ -117,15 +116,35 @@ void file_request(enum func func, const char *buf, uint32_t buf_size) {
     }
     default: PANIC("Bad enum: %u", func);
     }
+
+    // char user_input[1024];
+    // std::cin.getline(user_input, 1024);
+    // std::cout << "Got: '" << user_input << "'" << std::endl;
+    // trigger->Execute(user_input);
 }
 
-int main(int argc, char *const argv[]) {
 
-    if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " COMMAND..." << std::endl;
+static void sighandler(int signum) {
+    std::cout << "ABORTING: Got signal: " << signum << std::endl;
+    exit(1);
+}
+
+
+int main(int argc, char *const argv[])
+{
+
+    if (argc != 2) {
+        std::cerr << "Usage: " << argv[0] << " COMMAND" << std::endl;
         exit(1);
     }
 
-    Trigger trigger(&file_request);
-    trigger.Execute(argv[1], (argv + 1));
+    struct sigaction sa;
+    sa.sa_handler =  sighandler;
+    sa.sa_flags = 0;
+    sigemptyset(&sa.sa_mask);
+    sigaction( SIGINT, &sa, NULL );
+
+    trigger = new Trigger(&file_request);
+    trigger->Execute(argv[1]);//, (argv + 1));
+    std::cout << "Shutdown" << std::endl;
 }

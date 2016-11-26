@@ -32,7 +32,7 @@ static volatile bool log_lock = false;
         while (!__atomic_compare_exchange_n(&log_lock, &expected_false, true, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) { \
             usleep(10);                                                 \
         }                                                               \
-        fprintf(stdout, "%u:%lX: " fmt "\n", getpid(), pthread_self(), ##__VA_ARGS__); \
+        fprintf(stderr, "%u:%lX: " fmt "\n", getpid(), pthread_self(), ##__VA_ARGS__); \
         log_lock = false;                                               \
     } while (0)
 

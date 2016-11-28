@@ -104,7 +104,7 @@ private:
         bool running;
     };
 
-    struct Thread m_threads[100];
+    struct Thread m_threads[2048];
 
     struct Thread *alloc_thread();
 };

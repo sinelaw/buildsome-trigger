@@ -312,22 +312,23 @@ const char *get_input_path(enum func func_id, const char *buf, uint32_t buf_size
         DEFINE_DATA(struct func_execp, buf, buf_size, data);
         return data->file;
     }
-    case func_openw:
-    case func_creat:
-    case func_truncate:
-    case func_unlink:
-    case func_rename:
-    case func_chmod:
-    case func_mknod:
-    case func_mkdir:
-    case func_rmdir:
-    case func_link:
-    case func_chown:
-        return "<TODO>";
+    // TODO: For all outputs, return an input which is the directory which contains the output.
+    case func_openw: // return "<TODO: openw>";
+    case func_creat: // return "<TODO: creat>";
+    case func_truncate: // return "<TODO: truncate>";
+    case func_unlink: // return "<TODO: unlink>";
+    case func_rename: // return "<TODO: rename>";
+    case func_chmod: // return "<TODO: chmod>";
+    case func_mknod: // return "<TODO: mknod>";
+    case func_mkdir: // return "<TODO: mkdir>";
+    case func_rmdir: // return "<TODO: rmdir>";
+    case func_link: // return "<TODO: link>";
+    case func_chown: // return "<TODO: chown>";
+        return nullptr;
     case func_trace: {
         DEFINE_DATA(struct func_trace, buf, buf_size, data);
         LOG("TRACE: %s", data->msg);
-        return "<TODO>";
+        return nullptr;
     }
     default: PANIC("Unknown command: %d", func_id);
     }
@@ -404,7 +405,9 @@ void Trigger::handle_connection(int connection_fd, const struct TargetContext *t
         const char *const input_path = get_input_path(func_id, pos, str_size);
         // LOG(input_path);
         if (!delayed) continue;
-        this->want(input_path, target_ctx);
+        if (input_path) {
+            this->want(input_path, target_ctx);
+        }
         if (!send_go(connection_fd)) break;
     }
 }

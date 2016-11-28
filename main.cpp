@@ -15,7 +15,7 @@ static Trigger *trigger;
 static int pipefd_to_child[2];
 static int pipefd_to_parent[2];
 #define WRITE(str)                                      \
-    std::cerr << "WRITE: " << str << std::endl;         \
+    LOG("WRITE: %s", str);                              \
     write(pipefd_to_child[1], str, strlen(str));        \
     write(pipefd_to_child[1], "\n", strlen("\n"))
 
@@ -48,7 +48,7 @@ static void query(const char *const build_target, const struct TargetContext *ta
 
 
     user_input[pos] = '\0';
-    std::cerr << "For query: '" << build_target << "', got: '" << user_input << "'" << std::endl;
+    LOG("For query: '%s', got: '%s'", build_target, user_input);
     query_lock = false;
     // WRITE("Got: '" << user_input << "'");
     if (pos > 0) {
@@ -56,115 +56,8 @@ static void query(const char *const build_target, const struct TargetContext *ta
     }
 }
 
-void file_request(enum func func, const char *buf, uint32_t buf_size, const struct TargetContext *target_ctx)
+void file_request(const char *input_path, const struct TargetContext *target_ctx)
 {
-// std::cout << "HANDLING: " << buf << std::endl;
-    const char *input_path;
-    switch (func) {
-    case func_openw: {
-        DEFINE_DATA(struct func_openw, buf, buf_size, data);
-        return;
-    }
-    case func_creat: {
-        DEFINE_DATA(struct func_creat, buf, buf_size, data);
-        return;
-    }
-    case func_truncate: {
-        DEFINE_DATA(struct func_truncate, buf, buf_size, data);
-        return;
-    }
-    case func_unlink: {
-        DEFINE_DATA(struct func_unlink, buf, buf_size, data);
-        return;
-    }
-    case func_rename: {
-        DEFINE_DATA(struct func_rename, buf, buf_size, data);
-        return;
-    }
-    case func_chmod: {
-        DEFINE_DATA(struct func_chmod, buf, buf_size, data);
-        return;
-    }
-    case func_mknod: {
-        DEFINE_DATA(struct func_mknod, buf, buf_size, data);
-        return;
-    }
-    case func_mkdir: {
-        DEFINE_DATA(struct func_mkdir, buf, buf_size, data);
-        return;
-    }
-    case func_rmdir: {
-        DEFINE_DATA(struct func_rmdir, buf, buf_size, data);
-        return;
-    }
-    case func_link: {
-        DEFINE_DATA(struct func_link, buf, buf_size, data);
-        return;
-    }
-    case func_chown: {
-        DEFINE_DATA(struct func_chown, buf, buf_size, data);
-        return;
-    }
-
-    case func_openr: {
-        DEFINE_DATA(struct func_openr, buf, buf_size, data);
-        input_path = data->path.in_path;
-        break;
-    }
-    case func_stat: {
-        DEFINE_DATA(struct func_stat, buf, buf_size, data);
-        input_path = data->path.in_path;
-        break;
-    }
-    case func_lstat: {
-        DEFINE_DATA(struct func_lstat, buf, buf_size, data);
-        input_path = data->path.in_path;
-        break;
-    }
-    case func_opendir: {
-        DEFINE_DATA(struct func_opendir, buf, buf_size, data);
-        input_path = data->path.in_path;
-        break;
-    }
-    case func_access: {
-        DEFINE_DATA(struct func_access, buf, buf_size, data);
-        input_path = data->path.in_path;
-        break;
-    }
-    case func_readlink: {
-        DEFINE_DATA(struct func_readlink, buf, buf_size, data);
-        input_path = data->path.in_path;
-        break;
-    }
-    case func_symlink: {
-        DEFINE_DATA(struct func_symlink, buf, buf_size, data);
-        input_path = data->target.in_path;
-        break;
-    }
-    case func_exec: {
-        DEFINE_DATA(struct func_exec, buf, buf_size, data);
-        input_path = data->path.in_path;
-        break;
-    }
-    case func_realpath: {
-        DEFINE_DATA(struct func_realpath, buf, buf_size, data);
-        input_path = data->path.in_path;
-        break;
-    }
-
-    case func_execp: {
-        DEFINE_DATA(struct func_execp, buf, buf_size, data);
-        input_path = data->file;
-        break;
-    }
-    case func_trace: {
-        DEFINE_DATA(struct func_trace, buf, buf_size, data);
-        // std::cerr << "TRACE: '" << data->msg << "'" << std::endl;
-        return;
-    }
-    default: PANIC("Bad enum: %u", func);
-    }
-
     query(input_path, target_ctx);
 }
 
@@ -216,6 +109,6 @@ int main(int argc, char *const argv[])
     close(pipefd_to_parent[1]);
 
     trigger = new Trigger(&file_request);
-    query(argv[2], NULL);
-    std::cerr << "Shutdown" << std::endl;
+    trigger->want(argv[2], NULL);
+    LOG("Shutdown");
 }

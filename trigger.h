@@ -26,6 +26,24 @@ static inline void panic(void) {
 
 #define ARRAY_LEN(x) (sizeof(x)/sizeof(x[0]))
 
+static volatile bool log_lock = false;
+
+#ifdef DEBUG
+
+#define LOG(fmt, ...) do {                                              \
+        bool expected_false = false;                                    \
+        while (!__atomic_compare_exchange_n(&log_lock, &expected_false, true, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) { \
+            usleep(10);                                                 \
+        }                                                               \
+        fprintf(stderr, "%u:%lX: " fmt "\n", getpid(), pthread_self(), ##__VA_ARGS__); \
+        log_lock = false;                                               \
+    } while (0)
+
+#else
+
+#define LOG(...) do { } while (0)
+
+#endif
 
 struct TargetContext {
     const char *path;
@@ -37,7 +55,7 @@ struct TargetContext {
  * access functions will be allowed to execute.
  *
  * Executed at most once per filename. */
-typedef void FileRequestCb(enum func func_id, const char *buf, uint32_t buf_size, const struct TargetContext *);
+typedef void FileRequestCb(const char *input_path, const struct TargetContext *);
 
 typedef std::string FilePath;
 
@@ -64,9 +82,9 @@ public:
     /* Executes the given command while hooking its file accesses. */
     void Execute(const char *cmd, const struct TargetContext *); //, char *const argv[]);
 
+    void want(const char *file_path, const struct TargetContext *);
     void handle_connection(int connection_fd, const struct TargetContext *);
     bool trigger_accept(int fd, const struct sockaddr_un *addr, const struct TargetContext *);
-
 private:
 
     void harvest_threads();

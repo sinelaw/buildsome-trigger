@@ -25,16 +25,6 @@ extern "C" {
 #define PROTOCOL_HELLO "PROTOCOL10: HELLO, I AM: "
 #define LD_PRELOAD_PATH "./fs_override.so"
 
-static volatile bool log_lock = false;
-
-#define LOG(fmt, ...) do {                                              \
-        bool expected_false = false;                                    \
-        while (!__atomic_compare_exchange_n(&log_lock, &expected_false, true, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) { \
-            usleep(10);                                                 \
-        }                                                               \
-        fprintf(stderr, "%u:%lX: " fmt "\n", getpid(), pthread_self(), ##__VA_ARGS__); \
-        log_lock = false;                                               \
-    } while (0)
 
 
 Trigger::Trigger(FileRequestCb *cb) {
@@ -153,7 +143,9 @@ static void debug_req(enum func func_id, bool delayed, uint32_t str_size)
 
     LOG("recv: delayed=%s, func=%s, size=%u",
         (delayed ? "yes" : "no"),  name, str_size);
-
+    (void)name;
+    (void)delayed;
+    (void)str_size;
 }
 
 static bool wait_for(pid_t child) {
@@ -341,6 +333,55 @@ const char *get_input_path(enum func func_id, const char *buf, uint32_t buf_size
     }
 }
 
+void Trigger::want(const char *input_path, const struct TargetContext *target_ctx)
+{
+    auto it = m_fileStatus.find(input_path);
+    const struct TargetContext new_target_ctx = {
+        .path = input_path,
+        .parent = target_ctx,
+    };
+    bool is_nesting = false;;
+    const struct TargetContext *cur = target_ctx;
+    while (cur) {
+        if (0 == strcmp(cur->path, input_path)) {
+            is_nesting = true;
+            break;
+        }
+        cur = cur->parent;
+    }
+    /* in child of parent building this path, just release it */
+    if (is_nesting) {
+        return;
+    }
+    if (it == m_fileStatus.end()) {
+        m_fileStatus[input_path] = REQUESTED_FILE_STATUS_PENDING;
+        m_cb(input_path, &new_target_ctx);
+        m_fileStatus[input_path] = REQUESTED_FILE_STATUS_READY;
+    } else {
+        switch (it->second) {
+        case REQUESTED_FILE_STATUS_UNKNOWN:
+            m_fileStatus[input_path] = REQUESTED_FILE_STATUS_PENDING;
+            m_cb(input_path, &new_target_ctx);
+            m_fileStatus[input_path] = REQUESTED_FILE_STATUS_READY;
+            break;
+        case REQUESTED_FILE_STATUS_PENDING: {
+            LOG("Waiting for: '%s'...", input_path);
+            while (true) {
+                auto it2 = m_fileStatus.find(input_path);
+                ASSERT(it2 != m_fileStatus.end());
+                if (it2->second == REQUESTED_FILE_STATUS_READY) {
+                    break;
+                }
+                usleep(100);
+            }
+            break;
+        }
+        case REQUESTED_FILE_STATUS_READY:
+            break;
+        }
+    }
+}
+
 void Trigger::handle_connection(int connection_fd, const struct TargetContext *target_ctx)
 {
     char buf[0x8000];
@@ -364,51 +405,7 @@ void Trigger::handle_connection(int connection_fd, const struct TargetContext *t
         const char *const input_path = get_input_path(func_id, pos, str_size);
         // LOG(input_path);
         if (!delayed) continue;
-        auto it = m_fileStatus.find(input_path);
-        const struct TargetContext new_target_ctx = {
-            .path = input_path,
-            .parent = target_ctx,
-        };
-        if (it == m_fileStatus.end()) {
-            m_fileStatus[input_path] = REQUESTED_FILE_STATUS_PENDING;
-            m_cb(func_id, pos, str_size, &new_target_ctx);
-            m_fileStatus[input_path] = REQUESTED_FILE_STATUS_READY;
-        } else {
-            switch (it->second) {
-            case REQUESTED_FILE_STATUS_UNKNOWN:
-                m_fileStatus[input_path] = REQUESTED_FILE_STATUS_PENDING;
-                m_cb(func_id, pos, str_size, &new_target_ctx);
-                m_fileStatus[input_path] = REQUESTED_FILE_STATUS_READY;
-                break;
-            case REQUESTED_FILE_STATUS_PENDING: {
-                const struct TargetContext *cur = target_ctx;
-                bool is_nesting = false;;
-                while (cur) {
-                    if (0 == strcmp(cur->path, input_path)) {
-                        /* in child of parent building this path, just release it */
-                        is_nesting = true;
-                        break;
-                    }
-                    cur = cur->parent;
-                }
-                if (!is_nesting) {
-                    LOG("Waiting for: '%s'...", input_path);
-                    while (true) {
-                        auto it2 = m_fileStatus.find(input_path);
-                        ASSERT(it2 != m_fileStatus.end());
-                        if (it2->second == REQUESTED_FILE_STATUS_READY) {
-                            break;
-                        }
-                        usleep(100);
-                    }
-                }
-                break;
-            }
-            case REQUESTED_FILE_STATUS_READY:
-                break;
-            }
-        }
-
+        this->want(input_path, target_ctx);
         if (!send_go(connection_fd)) break;
     }
 }
@@ -424,6 +421,7 @@ void Trigger::Execute(const char *cmd, const struct TargetContext *target_ctx)//
 
 
     LOG("Forking child: %s", cmd);
+    std::cerr << "Execute: " << cmd << std::endl;
 
     int parent_child_pipe[2];
     ASSERT(0 == pipe(parent_child_pipe));
@@ -465,4 +463,6 @@ void Trigger::Execute(const char *cmd, const struct TargetContext *target_ctx)//
     LOG("Done accepting, waiting for child: %d", child);
     LOG("Child %d terminated", child);
     close(sock_fd);
+
+    std::cerr << "Execute [done]: " << cmd << std::endl;
 }

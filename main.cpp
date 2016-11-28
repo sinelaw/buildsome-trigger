@@ -19,7 +19,7 @@ static int pipefd_to_parent[2];
     write(pipefd_to_child[1], str, strlen(str));        \
     write(pipefd_to_child[1], "\n", strlen("\n"))
 
-static void query(const char *const build_target)
+static void query(const char *const build_target, const struct TargetContext *target_ctx)
 {
     static volatile bool query_lock = false;
     while (query_lock) {
@@ -52,13 +52,14 @@ static void query(const char *const build_target)
     query_lock = false;
     // WRITE("Got: '" << user_input << "'");
     if (pos > 0) {
-        trigger->Execute(user_input);
+        trigger->Execute(user_input, target_ctx);
     }
 }
 
-void file_request(enum func func, const char *buf, uint32_t buf_size)
+void file_request(enum func func, const char *buf, uint32_t buf_size, const struct TargetContext *target_ctx)
 {
 // std::cout << "HANDLING: " << buf << std::endl;
+    const char *input_path;
     switch (func) {
     case func_openw: {
         DEFINE_DATA(struct func_openw, buf, buf_size, data);
@@ -107,53 +108,53 @@ void file_request(enum func func, const char *buf, uint32_t buf_size)
 
     case func_openr: {
         DEFINE_DATA(struct func_openr, buf, buf_size, data);
-        query(data->path.in_path);
+        input_path = data->path.in_path;
         break;
     }
     case func_stat: {
         DEFINE_DATA(struct func_stat, buf, buf_size, data);
-        query(data->path.in_path);
+        input_path = data->path.in_path;
         break;
     }
     case func_lstat: {
         DEFINE_DATA(struct func_lstat, buf, buf_size, data);
-        query(data->path.in_path);
+        input_path = data->path.in_path;
         break;
     }
     case func_opendir: {
         DEFINE_DATA(struct func_opendir, buf, buf_size, data);
-        query(data->path.in_path);
+        input_path = data->path.in_path;
         break;
     }
     case func_access: {
         DEFINE_DATA(struct func_access, buf, buf_size, data);
-        query(data->path.in_path);
+        input_path = data->path.in_path;
         break;
     }
     case func_readlink: {
         DEFINE_DATA(struct func_readlink, buf, buf_size, data);
-        query(data->path.in_path);
+        input_path = data->path.in_path;
         break;
     }
     case func_symlink: {
         DEFINE_DATA(struct func_symlink, buf, buf_size, data);
-        query(data->target.in_path);
+        input_path = data->target.in_path;
         break;
     }
     case func_exec: {
         DEFINE_DATA(struct func_exec, buf, buf_size, data);
-        query(data->path.in_path);
+        input_path = data->path.in_path;
         break;
     }
     case func_realpath: {
         DEFINE_DATA(struct func_realpath, buf, buf_size, data);
-        query(data->path.in_path);
+        input_path = data->path.in_path;
         break;
     }
 
     case func_execp: {
         DEFINE_DATA(struct func_execp, buf, buf_size, data);
-        query(data->file);
+        input_path = data->file;
         break;
     }
     case func_trace: {
@@ -163,6 +164,8 @@ void file_request(enum func func, const char *buf, uint32_t buf_size)
     }
     default: PANIC("Bad enum: %u", func);
     }
+
+    query(input_path, target_ctx);
 }
 
 
@@ -213,6 +216,6 @@ int main(int argc, char *const argv[])
     close(pipefd_to_parent[1]);
 
     trigger = new Trigger(&file_request);
-    query(argv[2]);
+    query(argv[2], NULL);
     std::cerr << "Shutdown" << std::endl;
 }

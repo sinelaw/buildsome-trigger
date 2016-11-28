@@ -26,11 +26,18 @@ static inline void panic(void) {
 
 #define ARRAY_LEN(x) (sizeof(x)/sizeof(x[0]))
 
+
+struct TargetContext {
+    const char *path;
+    const struct TargetContext *parent;
+};
+
+
 /* Request for a file to be built. After the callback returns, file
  * access functions will be allowed to execute.
  *
  * Executed at most once per filename. */
-typedef void FileRequestCb(enum func func_id, const char *buf, uint32_t buf_size);
+typedef void FileRequestCb(enum func func_id, const char *buf, uint32_t buf_size, const struct TargetContext *);
 
 typedef std::string FilePath;
 
@@ -50,30 +57,31 @@ typedef enum RequestedFileStatus {
 /*     char *const m_envp[]; */
 /* }; */
 
-
-
-
 class Trigger {
 public:
     Trigger(FileRequestCb *cb);
 
     /* Executes the given command while hooking its file accesses. */
-    void Execute(const char *cmd); //, char *const argv[]);
+    void Execute(const char *cmd, const struct TargetContext *); //, char *const argv[]);
 
-    void handle_connection(int connection_fd);
-    bool trigger_accept(int fd, const struct sockaddr_un *addr);
+    void handle_connection(int connection_fd, const struct TargetContext *);
+    bool trigger_accept(int fd, const struct sockaddr_un *addr, const struct TargetContext *);
 
 private:
+
+    void harvest_threads();
 
     std::map<FilePath, RequestedFileStatus> m_fileStatus;
     FileRequestCb *m_cb;
     uint64_t m_child_idx;
+    volatile bool m_threads_lock;
 
     struct Thread {
         pthread_t thread_id;
         pthread_attr_t attr;
         Trigger *trigger;
         bool in_use;
+        bool running;
     };
 
     struct Thread m_threads[100];

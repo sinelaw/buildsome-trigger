@@ -42,7 +42,9 @@ Trigger::Trigger(FileRequestCb *cb) {
     m_child_idx = 0;
     for (uint32_t i = 0; i < ARRAY_LEN(m_threads); i++) {
         m_threads[i].in_use = false;
+        m_threads[i].running = false;
     }
+    m_threads_lock = false;
 }
 
 static char putenv_buffers[1024][1024];
@@ -154,32 +156,29 @@ static void debug_req(enum func func_id, bool delayed, uint32_t str_size)
 
 }
 
-static int wait_all(pid_t child) {
-    bool found = false;
-    int res = 1;
-    LOG("Waiting for %d to terminate", child);
-    while (true) {
-        int wait_res;
-        int wait_child = waitpid(child, &wait_res, 0);
-        if ((wait_child == -1) && (errno == ECHILD)) {
-            ASSERT(found);
-            return res;
-        } else if (wait_child == child) {
-            found = true;
-            res = wait_res;
-        }
+static bool wait_for(pid_t child) {
+    int wait_res;
+    int wait_child = waitpid(child, &wait_res, WNOHANG);
+    if ((wait_child < 0) && (errno == EINTR)) {
+        return false;
     }
-    PANIC("wat");
+    ASSERT(wait_child >= 0);
+    if (wait_child == 0) {
+        return false;
+    }
+    ASSERT(wait_child == child);
+    return true;
 }
 
 struct ConnectionParams {
     Trigger *trigger;
     int connection_fd;
     volatile bool started;
+    const struct TargetContext *target_ctx;
 };
 
-uint64_t connections_accepted = 0;
-uint64_t connections_completed = 0;
+static __thread uint64_t connections_accepted = 0;
+static __thread uint64_t connections_completed = 0;
 
 void *thread_start(void *arg)
 {
@@ -187,58 +186,82 @@ void *thread_start(void *arg)
     const struct ConnectionParams params = *orig_params;
     orig_params->started = true;
     LOG("Handling: %d",  params.connection_fd);
-    params.trigger->handle_connection(params.connection_fd);
-    LOG("Terminating");
+    params.trigger->handle_connection(params.connection_fd, params.target_ctx);
     close(params.connection_fd);
-    connections_completed++;
+    LOG("Terminating");
     return NULL;
+}
+
+void Trigger::harvest_threads()
+{
+    while (m_threads_lock) usleep(100);
+    m_threads_lock = true;
+    for (uint32_t i = 0; i < ARRAY_LEN(m_threads); i++) {
+        if (!m_threads[i].in_use) continue;
+        if (!m_threads[i].running) continue;
+        void *res;
+        if (0 == pthread_tryjoin_np(m_threads[i].thread_id, &res)) {
+            m_threads[i].running = false;
+            m_threads[i].in_use = false;
+            connections_completed++;
+            LOG("connections_accepted: %lu, connections_completed: %lu", connections_accepted, connections_completed);
+        }
+    }
+    m_threads_lock = false;
 }
 
 struct Trigger::Thread *Trigger::alloc_thread()
 {
     while (true) {
+        while (m_threads_lock) usleep(100);
+        m_threads_lock = true;
         for (uint32_t i = 0; i < ARRAY_LEN(m_threads); i++) {
             if (!m_threads[i].in_use) {
                 m_threads[i].in_use = true;
+                m_threads_lock = false;
                 return &m_threads[i];
-                break;
             }
+            if (!m_threads[i].running) continue; /* started but not yet running, can't use it */
             void *res;
             if (0 == pthread_tryjoin_np(m_threads[i].thread_id, &res)) {
+                m_threads[i].running = false;
+                m_threads_lock = false;
                 return &m_threads[i];
             }
         }
+        m_threads_lock = false;
         usleep(100);
     }
 }
 
-bool Trigger::trigger_accept(int fd, const struct sockaddr_un *addr)
+bool Trigger::trigger_accept(int fd, const struct sockaddr_un *addr, const struct TargetContext *target_ctx)
 {
     socklen_t addrlen = sizeof(struct sockaddr_un);
-    LOG("Accepting...");
     int connection_fd;
-    while (true) {
-        if (connections_accepted > 0 && (connections_completed == connections_accepted)) {
-            LOG("All connections closed");
-            return false;
-        }
-        connection_fd = accept(fd, (struct sockaddr *)addr, &addrlen);
-        if (connection_fd >= 0) break;
+    this->harvest_threads();
+    // if (connections_accepted > 0 && (connections_completed == connections_accepted)) {
+    //     LOG("All connections closed");
+    //     return false;
+    // }
+    connection_fd = accept(fd, (struct sockaddr *)addr, &addrlen);
+    if (connection_fd < 0) {
         ASSERT(errno == EAGAIN || errno == EWOULDBLOCK);
-        usleep(100);
+        return false;
     }
     ASSERT(connection_fd >= 0);
     // HANDLE CONNECTION
-    LOG("Got connection");
     connections_accepted++;
+    LOG("Got connection, connections_accepted: %lu", connections_accepted);
 
     Thread *const thread = this->alloc_thread();
     ASSERT(thread != nullptr);
+    ASSERT(thread->running == false);
     thread->trigger = this;
     struct ConnectionParams params = {
         .trigger = this,
         .connection_fd = connection_fd,
         .started = false,
+        .target_ctx = target_ctx,
     };
     ASSERT(0 == pthread_attr_init(&thread->attr));
     ASSERT(0 == pthread_create(&thread->thread_id, &thread->attr,
@@ -248,6 +271,7 @@ bool Trigger::trigger_accept(int fd, const struct sockaddr_un *addr)
     while (!params.started) {
         usleep(100);
     }
+    thread->running = true;
     LOG("Done waiting for handler thread: %lX", thread->thread_id);
     return true;
 }
@@ -317,7 +341,7 @@ const char *get_input_path(enum func func_id, const char *buf, uint32_t buf_size
     }
 }
 
-void Trigger::handle_connection(int connection_fd)
+void Trigger::handle_connection(int connection_fd, const struct TargetContext *target_ctx)
 {
     char buf[0x8000];
     uint32_t size;
@@ -341,28 +365,45 @@ void Trigger::handle_connection(int connection_fd)
         // LOG(input_path);
         if (!delayed) continue;
         auto it = m_fileStatus.find(input_path);
+        const struct TargetContext new_target_ctx = {
+            .path = input_path,
+            .parent = target_ctx,
+        };
         if (it == m_fileStatus.end()) {
             m_fileStatus[input_path] = REQUESTED_FILE_STATUS_PENDING;
-            m_cb(func_id, pos, str_size);
+            m_cb(func_id, pos, str_size, &new_target_ctx);
             m_fileStatus[input_path] = REQUESTED_FILE_STATUS_READY;
         } else {
             switch (it->second) {
             case REQUESTED_FILE_STATUS_UNKNOWN:
                 m_fileStatus[input_path] = REQUESTED_FILE_STATUS_PENDING;
-                m_cb(func_id, pos, str_size);
+                m_cb(func_id, pos, str_size, &new_target_ctx);
                 m_fileStatus[input_path] = REQUESTED_FILE_STATUS_READY;
                 break;
-            case REQUESTED_FILE_STATUS_PENDING:
-                LOG("Waiting for: '%s'...", input_path);
-                while (true) {
-                    auto it2 = m_fileStatus.find(input_path);
-                    ASSERT(it2 != m_fileStatus.end());
-                    if (it2->second == REQUESTED_FILE_STATUS_READY) {
+            case REQUESTED_FILE_STATUS_PENDING: {
+                const struct TargetContext *cur = target_ctx;
+                bool is_nesting = false;;
+                while (cur) {
+                    if (0 == strcmp(cur->path, input_path)) {
+                        /* in child of parent building this path, just release it */
+                        is_nesting = true;
                         break;
                     }
-                    usleep(100);
+                    cur = cur->parent;
+                }
+                if (!is_nesting) {
+                    LOG("Waiting for: '%s'...", input_path);
+                    while (true) {
+                        auto it2 = m_fileStatus.find(input_path);
+                        ASSERT(it2 != m_fileStatus.end());
+                        if (it2->second == REQUESTED_FILE_STATUS_READY) {
+                            break;
+                        }
+                        usleep(100);
+                    }
                 }
                 break;
+            }
             case REQUESTED_FILE_STATUS_READY:
                 break;
             }
@@ -372,7 +413,7 @@ void Trigger::handle_connection(int connection_fd)
     }
 }
 
-void Trigger::Execute(const char *cmd)//, char *const argv[])
+void Trigger::Execute(const char *cmd, const struct TargetContext *target_ctx)//, char *const argv[])
 {
     uint64_t child_idx = m_child_idx;
     m_child_idx++;
@@ -417,10 +458,11 @@ void Trigger::Execute(const char *cmd)//, char *const argv[])
 
     LOG("Sent yup");
 
-    while (this->trigger_accept(sock_fd, &addr)) {
-        // bla
+    while (!wait_for(child)) {
+        this->trigger_accept(sock_fd, &addr, target_ctx);
+        usleep(100);
     }
-    wait_all(child);
+    LOG("Done accepting, waiting for child: %d", child);
     LOG("Child %d terminated", child);
     close(sock_fd);
 }

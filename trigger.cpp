@@ -357,28 +357,27 @@ void Trigger::want(const char *input_path, const struct TargetContext *target_ct
         m_fileStatus[input_path] = REQUESTED_FILE_STATUS_PENDING;
         m_cb(input_path, &new_target_ctx);
         m_fileStatus[input_path] = REQUESTED_FILE_STATUS_READY;
-    } else {
-        switch (it->second) {
-        case REQUESTED_FILE_STATUS_UNKNOWN:
-            m_fileStatus[input_path] = REQUESTED_FILE_STATUS_PENDING;
-            m_cb(input_path, &new_target_ctx);
-            m_fileStatus[input_path] = REQUESTED_FILE_STATUS_READY;
-            break;
-        case REQUESTED_FILE_STATUS_PENDING: {
-            LOG("Waiting for: '%s'...", input_path);
-            while (true) {
-                auto it2 = m_fileStatus.find(input_path);
-                ASSERT(it2 != m_fileStatus.end());
-                if (it2->second == REQUESTED_FILE_STATUS_READY) {
-                    break;
-                }
-                usleep(100);
+        return;
+    }
+    switch (it->second) {
+    case REQUESTED_FILE_STATUS_READY: return;
+    case REQUESTED_FILE_STATUS_UNKNOWN:
+        m_fileStatus[input_path] = REQUESTED_FILE_STATUS_PENDING;
+        m_cb(input_path, &new_target_ctx);
+        m_fileStatus[input_path] = REQUESTED_FILE_STATUS_READY;
+        break;
+    case REQUESTED_FILE_STATUS_PENDING: {
+        LOG("Waiting for: '%s'...", input_path);
+        while (true) {
+            auto it2 = m_fileStatus.find(input_path);
+            ASSERT(it2 != m_fileStatus.end());
+            if (it2->second == REQUESTED_FILE_STATUS_READY) {
+                break;
             }
-            break;
+            usleep(100);
         }
-        case REQUESTED_FILE_STATUS_READY:
-            break;
-        }
+        break;
+    }
     }
 }
 
@@ -440,7 +439,7 @@ void Trigger::Execute(const char *cmd, const struct TargetContext *target_ctx)//
         PUTENV("BUILDSOME_JOB_ID=%lu", child_idx);
         PUTENV("BUILDSOME_ROOT_FILTER=%s", cwd);
         free(cwd);
-        const char *const args[] = { "sh", "-c", cmd, NULL };
+        const char *const args[] = { SHELL_EXE_PATH, "-c", cmd, NULL };
         execvp("/bin/sh", (char *const*)args);
         PANIC("exec failed?!");
     }

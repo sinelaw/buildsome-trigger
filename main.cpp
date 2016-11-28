@@ -31,7 +31,7 @@ static void query(const char *const build_target, const struct TargetContext *ta
 
 #define MIN(x, y) ((x <= y) ? x : y)
 
-    char user_input[1024];
+    char user_input[0x8000];
     uint32_t pos = 0;
     while (true) {
         int read_res = read(pipefd_to_parent[0], &user_input[pos], 1);
@@ -43,6 +43,7 @@ static void query(const char *const build_target, const struct TargetContext *ta
             break;
         }
         // std::cerr << "read: " << user_input[pos] << std::endl;
+        ASSERT(pos < ARRAY_LEN(user_input));
         pos++;
     }
 
@@ -100,7 +101,7 @@ int main(int argc, char *const argv[])
         dup2(pipefd_to_child[0], STDIN_FILENO);
         dup2(pipefd_to_parent[1], STDOUT_FILENO);
         // dup2(pipefd[1], 3);
-        const char *const args[] = { "sh", "-c", argv[1], NULL };
+        const char *const args[] = { SHELL_EXE_PATH, "-c", argv[1], NULL };
         execvp("/bin/sh", (char *const*)args);
         fprintf(stderr, "execl failed\n");
         exit(1);

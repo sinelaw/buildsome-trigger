@@ -8,6 +8,8 @@ extern "C" {
 #include "fshook/protocol.h"
 }
 
+#define SHELL_EXE_PATH "/usr/bin/bash"
+
 static inline void panic(void) __attribute__((noreturn));
 static inline void panic(void) {
     abort();

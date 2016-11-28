@@ -319,7 +319,7 @@ const char *get_input_path(enum func func_id, const char *buf, uint32_t buf_size
 
 void Trigger::handle_connection(int connection_fd)
 {
-    char buf[0x4000];
+    char buf[0x8000];
     uint32_t size;
     if (!recv_buf(connection_fd, buf, sizeof(buf), &size)) return;
     if (0 != strncmp(PROTOCOL_HELLO, buf, MIN(size, strlen(PROTOCOL_HELLO)))) {
@@ -353,8 +353,16 @@ void Trigger::handle_connection(int connection_fd)
                 m_fileStatus[input_path] = REQUESTED_FILE_STATUS_READY;
                 break;
             case REQUESTED_FILE_STATUS_PENDING:
-                sleep(1);
-                continue;
+                LOG("Waiting for: '%s'...", input_path);
+                while (true) {
+                    auto it2 = m_fileStatus.find(input_path);
+                    ASSERT(it2 != m_fileStatus.end());
+                    if (it2->second == REQUESTED_FILE_STATUS_READY) {
+                        break;
+                    }
+                    usleep(100);
+                }
+                break;
             case REQUESTED_FILE_STATUS_READY:
                 break;
             }

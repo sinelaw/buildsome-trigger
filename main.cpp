@@ -16,8 +16,45 @@ static int pipefd_to_child[2];
 static int pipefd_to_parent[2];
 #define WRITE(str)                                      \
     std::cerr << "WRITE: " << str << std::endl;         \
-    write(pipefd_to_child[1], str, strlen(str));          \
-    write(pipefd_to_child[1], "\n\n", strlen("\n\n"))
+    write(pipefd_to_child[1], str, strlen(str));        \
+    write(pipefd_to_child[1], "\n", strlen("\n"))
+
+static void query(const char *const build_target)
+{
+    static volatile bool query_lock = false;
+    while (query_lock) {
+        usleep(100);
+    }
+    query_lock = true;
+
+    WRITE(build_target);
+
+#define MIN(x, y) ((x <= y) ? x : y)
+
+    char user_input[1024];
+    uint32_t pos = 0;
+    while (true) {
+        int read_res = read(pipefd_to_parent[0], &user_input[pos], 1);
+        if (read_res < 1) {
+            perror("read");
+            exit(1);
+        }
+        if (user_input[pos] == '\n') {
+            break;
+        }
+        // std::cerr << "read: " << user_input[pos] << std::endl;
+        pos++;
+    }
+
+
+    user_input[pos] = '\0';
+    std::cerr << "For query: '" << build_target << "', got: '" << user_input << "'" << std::endl;
+    query_lock = false;
+    // WRITE("Got: '" << user_input << "'");
+    if (pos > 0) {
+        trigger->Execute(user_input);
+    }
+}
 
 void file_request(enum func func, const char *buf, uint32_t buf_size)
 {
@@ -70,53 +107,53 @@ void file_request(enum func func, const char *buf, uint32_t buf_size)
 
     case func_openr: {
         DEFINE_DATA(struct func_openr, buf, buf_size, data);
-        WRITE(data->path.in_path);
+        query(data->path.in_path);
         break;
     }
     case func_stat: {
         DEFINE_DATA(struct func_stat, buf, buf_size, data);
-        WRITE(data->path.in_path);
+        query(data->path.in_path);
         break;
     }
     case func_lstat: {
         DEFINE_DATA(struct func_lstat, buf, buf_size, data);
-        WRITE(data->path.in_path);
+        query(data->path.in_path);
         break;
     }
     case func_opendir: {
         DEFINE_DATA(struct func_opendir, buf, buf_size, data);
-        WRITE(data->path.in_path);
+        query(data->path.in_path);
         break;
     }
     case func_access: {
         DEFINE_DATA(struct func_access, buf, buf_size, data);
-        WRITE(data->path.in_path);
+        query(data->path.in_path);
         break;
     }
     case func_readlink: {
         DEFINE_DATA(struct func_readlink, buf, buf_size, data);
-        WRITE(data->path.in_path);
+        query(data->path.in_path);
         break;
     }
     case func_symlink: {
         DEFINE_DATA(struct func_symlink, buf, buf_size, data);
-        WRITE(data->target.in_path);
+        query(data->target.in_path);
         break;
     }
     case func_exec: {
         DEFINE_DATA(struct func_exec, buf, buf_size, data);
-        WRITE(data->path.in_path);
+        query(data->path.in_path);
         break;
     }
     case func_realpath: {
         DEFINE_DATA(struct func_realpath, buf, buf_size, data);
-        WRITE(data->path.in_path);
+        query(data->path.in_path);
         break;
     }
 
     case func_execp: {
         DEFINE_DATA(struct func_execp, buf, buf_size, data);
-        WRITE(data->file);
+        query(data->file);
         break;
     }
     case func_trace: {
@@ -126,26 +163,6 @@ void file_request(enum func func, const char *buf, uint32_t buf_size)
     }
     default: PANIC("Bad enum: %u", func);
     }
-
-#define MIN(x, y) ((x <= y) ? x : y)
-
-    char user_input[1024];
-    uint32_t pos = 0;
-    while (true) {
-        int read_res = read(pipefd_to_parent[0], &user_input[pos], 1);
-        if (read_res < 1) {
-            perror("read");
-            exit(1);
-        }
-        if (user_input[pos] == '\n') {
-            break;
-        }
-        pos++;
-    }
-    user_input[pos] = '\0';
-    std::cerr << "got: " << user_input << std::endl;
-    // WRITE("Got: '" << user_input << "'");
-    trigger->Execute(user_input);
 }
 
 
@@ -180,14 +197,15 @@ int main(int argc, char *const argv[])
     }
     const pid_t pid = fork();
     if (pid == 0) {
-        close(1);
-        close(2);
+        close(STDIN_FILENO);
+        close(STDOUT_FILENO);
         close(pipefd_to_child[1]);
         close(pipefd_to_parent[0]);
-        dup2(pipefd_to_child[0], 1);
-        dup2(pipefd_to_parent[1], 2);
+        dup2(pipefd_to_child[0], STDIN_FILENO);
+        dup2(pipefd_to_parent[1], STDOUT_FILENO);
         // dup2(pipefd[1], 3);
-        execl(argv[1], argv[1], (char*) NULL);
+        const char *const args[] = { "sh", "-c", argv[1], NULL };
+        execvp("/bin/sh", (char *const*)args);
         fprintf(stderr, "execl failed\n");
         exit(1);
     }
@@ -195,6 +213,6 @@ int main(int argc, char *const argv[])
     close(pipefd_to_parent[1]);
 
     trigger = new Trigger(&file_request);
-    trigger->Execute(argv[2]);//, (argv + 1));
+    query(argv[2]);
     std::cerr << "Shutdown" << std::endl;
 }

@@ -30,6 +30,8 @@ static inline void panic(void) {
 
 static volatile bool log_lock = false;
 
+#define DEBUG
+
 #ifdef DEBUG
 
 #define LOG(fmt, ...) do {                                              \

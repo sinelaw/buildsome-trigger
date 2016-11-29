@@ -148,7 +148,7 @@ static void debug_req(enum func func_id, bool delayed, uint32_t str_size)
     (void)str_size;
 }
 
-static bool wait_for(pid_t child) {
+static bool wait_for(pid_t child, const char *cmd) {
     int wait_res;
     int wait_child = waitpid(child, &wait_res, WNOHANG);
     if ((wait_child < 0) && (errno == EINTR)) {
@@ -159,6 +159,11 @@ static bool wait_for(pid_t child) {
         return false;
     }
     ASSERT(wait_child == child);
+    if (WEXITSTATUS(wait_res) != 0) {
+        fprintf(stderr, "BUILD FAILED: Child process %d exited with status: %d\n", child, WEXITSTATUS(wait_res));
+        fprintf(stderr, "BUILD FAILED: Failing command: %s\n", cmd);
+        exit(1);
+    }
     return true;
 }
 
@@ -268,67 +273,168 @@ bool Trigger::trigger_accept(int fd, const struct sockaddr_un *addr, const struc
     return true;
 }
 
-const char *get_input_path(enum func func_id, const char *buf, uint32_t buf_size)
+struct OperationPaths {
+    const char *input_paths[2];
+    uint32_t input_count;
+    const char *output_paths[2];
+    uint32_t output_count;
+};
+
+static void safer_dirname(const char *path, char *dirname, uint32_t dirname_max_size)
+{
+    const uint32_t len = strlen(path);
+
+    for (uint32_t i = len; i > 0; i--) {
+        if (path[i - 1] == '/') {
+            ASSERT(i < dirname_max_size);
+            memcpy(dirname, path, i - 1);
+            dirname[i] = '\0';
+            return;
+        }
+    }
+    dirname[0] = '\0';
+}
+
+static void get_input_paths(enum func func_id, const char *buf, uint32_t buf_size,
+                            struct OperationPaths *out_paths)
 {
     LOG("func_id: %X", func_id);
+    out_paths->input_count = 0;
+    out_paths->output_count = 0;
     switch (func_id) {
     case func_openr: {
         DEFINE_DATA(struct func_openr, buf, buf_size, data);
-        return data->path.in_path;
+        out_paths->input_paths[0] = data->path.in_path;
+        out_paths->input_count = 1;
+        break;
     }
     case func_stat: {
         DEFINE_DATA(struct func_stat, buf, buf_size, data);
-        return data->path.in_path;
+        out_paths->input_paths[0] = data->path.in_path;
+        out_paths->input_count = 1;
+        break;
     }
     case func_lstat: {
         DEFINE_DATA(struct func_lstat, buf, buf_size, data);
-        return data->path.in_path;
+        out_paths->input_paths[0] = data->path.in_path;
+        out_paths->input_count = 1;
+        break;
     }
     case func_opendir: {
         DEFINE_DATA(struct func_opendir, buf, buf_size, data);
-        return data->path.in_path;
+        out_paths->input_paths[0] = data->path.in_path;
+        out_paths->input_count = 1;
+        break;
     }
     case func_access: {
         DEFINE_DATA(struct func_access, buf, buf_size, data);
-        return data->path.in_path;
+        out_paths->input_paths[0] = data->path.in_path;
+        out_paths->input_count = 1;
+        break;
     }
     case func_readlink: {
         DEFINE_DATA(struct func_readlink, buf, buf_size, data);
-        return data->path.in_path;
+        out_paths->input_paths[0] = data->path.in_path;
+        out_paths->input_count = 1;
+        break;
     }
     case func_symlink: {
         DEFINE_DATA(struct func_symlink, buf, buf_size, data);
-        return data->linkpath.out_path; // TODO - out
+        out_paths->input_paths[0] = data->linkpath.out_path; // TODO - out
+        out_paths->input_count = 1;
+        break;
     }
     case func_exec: {
         DEFINE_DATA(struct func_exec, buf, buf_size, data);
-        return data->path.in_path;
+        out_paths->input_paths[0] = data->path.in_path;
+        out_paths->input_count = 1;
+        break;
     }
     case func_realpath: {
         DEFINE_DATA(struct func_realpath, buf, buf_size, data);
-        return data->path.in_path;
+        out_paths->input_paths[0] = data->path.in_path;
+        out_paths->input_count = 1;
+        break;
     }
     case func_execp: {
         DEFINE_DATA(struct func_execp, buf, buf_size, data);
-        return data->file;
+        out_paths->input_paths[0] = data->file;
+        out_paths->input_count = 1;
+        break;
     }
     // TODO: For all outputs, return an input which is the directory which contains the output.
-    case func_openw: // return "<TODO: openw>";
-    case func_creat: // return "<TODO: creat>";
-    case func_truncate: // return "<TODO: truncate>";
-    case func_unlink: // return "<TODO: unlink>";
-    case func_rename: // return "<TODO: rename>";
-    case func_chmod: // return "<TODO: chmod>";
-    case func_mknod: // return "<TODO: mknod>";
-    case func_mkdir: // return "<TODO: mkdir>";
-    case func_rmdir: // return "<TODO: rmdir>";
-    case func_link: // return "<TODO: link>";
-    case func_chown: // return "<TODO: chown>";
-        return nullptr;
+    case func_openw: {
+        DEFINE_DATA(struct func_openw, buf, buf_size, data);
+        out_paths->output_paths[0] = data->path.out_path;
+        out_paths->output_count = 1;
+        break;
+    }
+    case func_creat: {
+        DEFINE_DATA(struct func_creat, buf, buf_size, data);
+        out_paths->output_paths[0] = data->path.out_path;
+        out_paths->output_count = 1;
+        break;
+    }
+    case func_truncate: {
+        DEFINE_DATA(struct func_truncate, buf, buf_size, data);
+        out_paths->output_paths[0] = data->path.out_path;
+        out_paths->output_count = 1;
+        break;
+    }
+    case func_unlink: {
+        DEFINE_DATA(struct func_unlink, buf, buf_size, data);
+        out_paths->output_paths[0] = data->path.out_path;
+        out_paths->output_count = 1;
+        break;
+    }
+    case func_chmod: {
+        DEFINE_DATA(struct func_chmod, buf, buf_size, data);
+        out_paths->output_paths[0] = data->path.out_path;
+        out_paths->output_count = 1;
+        break;
+    }
+    case func_mknod: {
+        DEFINE_DATA(struct func_mknod, buf, buf_size, data);
+        out_paths->output_paths[0] = data->path.out_path;
+        out_paths->output_count = 1;
+        break;
+    }
+    case func_mkdir: {
+        DEFINE_DATA(struct func_mkdir, buf, buf_size, data);
+        out_paths->output_paths[0] = data->path.out_path;
+        out_paths->output_count = 1;
+        break;
+    }
+    case func_rmdir: {
+        DEFINE_DATA(struct func_rmdir, buf, buf_size, data);
+        out_paths->output_paths[0] = data->path.out_path;
+        out_paths->output_count = 1;
+        break;
+    }
+    case func_chown: {
+        DEFINE_DATA(struct func_chown, buf, buf_size, data);
+        out_paths->output_paths[0] = data->path.out_path;
+        out_paths->output_count = 1;
+        break;
+    }
+    case func_rename: {
+        DEFINE_DATA(struct func_rename, buf, buf_size, data);
+        out_paths->output_paths[0] = data->oldpath.out_path;
+        out_paths->output_paths[1] = data->newpath.out_path;
+        out_paths->output_count = 2;
+        break;
+    }
+    case func_link: {
+        DEFINE_DATA(struct func_link, buf, buf_size, data);
+        out_paths->output_paths[0] = data->oldpath.out_path;
+        out_paths->output_paths[1] = data->newpath.out_path;
+        out_paths->output_count = 2;
+        break;
+    }
     case func_trace: {
         DEFINE_DATA(struct func_trace, buf, buf_size, data);
         LOG("TRACE: %s", data->msg);
-        return nullptr;
+        break;
     }
     default: PANIC("Unknown command: %d", func_id);
     }
@@ -336,6 +442,7 @@ const char *get_input_path(enum func func_id, const char *buf, uint32_t buf_size
 
 void Trigger::want(const char *input_path, const struct TargetContext *target_ctx)
 {
+    LOG("WANT: %s", input_path);
     auto it = m_fileStatus.find(input_path);
     const struct TargetContext new_target_ctx = {
         .path = input_path,
@@ -402,11 +509,18 @@ void Trigger::handle_connection(int connection_fd, const struct TargetContext *t
         const uint32_t str_size = size - (pos - buf);
         debug_req(func_id, delayed, str_size);
 
-        const char *const input_path = get_input_path(func_id, pos, str_size);
+        struct OperationPaths paths;
+        get_input_paths(func_id, pos, str_size, &paths);
         // LOG(input_path);
         if (!delayed) continue;
-        if (input_path) {
-            this->want(input_path, target_ctx);
+        for (uint32_t i = 0; i < paths.input_count; i++) {
+            this->want(paths.input_paths[i], target_ctx);
+        }
+        for (uint32_t i = 0; i < paths.output_count; i++) {
+            char output_path[0x1000];
+            LOG("OUTPUT: %s", paths.output_paths[i]);
+            safer_dirname(paths.output_paths[i], output_path, ARRAY_LEN(output_path));
+            this->want(output_path, target_ctx);
         }
         if (!send_go(connection_fd)) break;
     }
@@ -458,7 +572,7 @@ void Trigger::Execute(const char *cmd, const struct TargetContext *target_ctx)//
 
     LOG("Sent yup");
 
-    while (!wait_for(child)) {
+    while (!wait_for(child, cmd)) {
         this->trigger_accept(sock_fd, &addr, target_ctx);
         usleep(100);
     }

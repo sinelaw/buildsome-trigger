@@ -8,6 +8,8 @@ extern "C" {
 #include "fshook/protocol.h"
 }
 
+#define AVOID_UNUSED(x) ((void)x)
+
 #define SHELL_EXE_PATH "/usr/bin/bash"
 
 static inline void panic(void) __attribute__((noreturn));
@@ -30,7 +32,7 @@ static inline void panic(void) {
 
 static volatile bool log_lock = false;
 
-#define DEBUG
+/* #define DEBUG */
 
 #ifdef DEBUG
 

@@ -19,6 +19,41 @@ static int pipefd_to_parent[2];
     write(pipefd_to_child[1], str, strlen(str));        \
     write(pipefd_to_child[1], "\n", strlen("\n"))
 
+static uint32_t read_line(int fd, char *output, uint32_t output_max_size)
+{
+    uint32_t pos = 0;
+    while (true) {
+        int read_res = read(fd, &output[pos], 1);
+        if (read_res < 1) {
+            perror("read");
+            exit(1);
+        }
+        if (output[pos] == '\n') {
+            break;
+        }
+        // std::cerr << "read: " << output[pos] << std::endl;
+        ASSERT(pos < output_max_size);
+        pos++;
+    }
+    output[pos] = '\0';
+    return pos;
+}
+
+static uint32_t read_multi_line(int fd, char *output, uint32_t output_max_size)
+{
+    const uint32_t read_size = read_line(fd, output, output_max_size);
+    ASSERT(read_size > 0);
+    char *endptr;
+    const uint32_t lines_count = strtoul(output, &endptr, 10);
+    ASSERT(endptr == output + strlen(output));
+    char *cur = output;
+    for (uint32_t i = 0; i < lines_count; i++) {
+        const uint32_t line_read_size = read_line(fd, cur, output_max_size - (cur - output));
+        cur += line_read_size;
+    }
+    return cur - output;
+}
+
 static void query(const char *const build_target, const struct TargetContext *target_ctx)
 {
     static volatile bool query_lock = false;
@@ -31,30 +66,22 @@ static void query(const char *const build_target, const struct TargetContext *ta
 
 #define MIN(x, y) ((x <= y) ? x : y)
 
-    char user_input[0x8000];
-    uint32_t pos = 0;
-    while (true) {
-        int read_res = read(pipefd_to_parent[0], &user_input[pos], 1);
-        if (read_res < 1) {
-            perror("read");
-            exit(1);
-        }
-        if (user_input[pos] == '\n') {
-            break;
-        }
-        // std::cerr << "read: " << user_input[pos] << std::endl;
-        ASSERT(pos < ARRAY_LEN(user_input));
-        pos++;
+    char target_cmd[0x8000];
+    const uint32_t cmd_size = read_multi_line(pipefd_to_parent[0], target_cmd, ARRAY_LEN(target_cmd));
+    if (cmd_size == 0) {
+        query_lock = false;
+        return;
     }
-
-
-    user_input[pos] = '\0';
-    LOG("For query: '%s', got: '%s'", build_target, user_input);
+    char target_inputs[0x1000];
+    const uint32_t inputs_size = read_multi_line(pipefd_to_parent[0], target_inputs, ARRAY_LEN(target_inputs));
+    AVOID_UNUSED(inputs_size);
+    char target_outputs[0x1000];
+    const uint32_t outputs_size = read_multi_line(pipefd_to_parent[0], target_outputs, ARRAY_LEN(target_outputs));
+    AVOID_UNUSED(outputs_size);
+    LOG("For query: '%s', got:\ncmd = '%s'\ninputs = '%s'\noutputs = '%s'", build_target, target_cmd, target_inputs, target_outputs);
     query_lock = false;
-    // WRITE("Got: '" << user_input << "'");
-    if (pos > 0) {
-        trigger->Execute(user_input, target_ctx);
-    }
+    // WRITE("Got: '" << target_cmd << "'");
+    trigger->Execute(target_cmd, target_ctx);
 }
 
 void file_request(const char *input_path, const struct TargetContext *target_ctx)

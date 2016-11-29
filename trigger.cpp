@@ -11,6 +11,8 @@ extern "C" {
 #include <unistd.h>
 #include <errno.h>
 #include <pthread.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 
 #include "fshook/protocol.h"
 }
@@ -520,7 +522,11 @@ void Trigger::handle_connection(int connection_fd, const struct TargetContext *t
             char output_path[0x1000];
             LOG("OUTPUT: %s", paths.output_paths[i]);
             safer_dirname(paths.output_paths[i], output_path, ARRAY_LEN(output_path));
-            this->want(output_path, target_ctx);
+            struct stat output_dir_stat;
+            if (0 != stat(output_path, &output_dir_stat)) {
+                ASSERT(ENOENT == errno);
+                this->want(output_path, target_ctx);
+            }
         }
         if (!send_go(connection_fd)) break;
     }

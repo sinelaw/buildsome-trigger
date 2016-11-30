@@ -58,7 +58,7 @@ static void query(const char *const build_target, const struct TargetContext *ta
 {
     static volatile bool query_lock = false;
     while (query_lock) {
-        usleep(100);
+        usleep(10);
     }
     query_lock = true;
 

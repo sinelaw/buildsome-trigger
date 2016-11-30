@@ -193,7 +193,7 @@ void *thread_start(void *arg)
 
 void Trigger::harvest_threads()
 {
-    while (m_threads_lock) usleep(100);
+    while (m_threads_lock) usleep(10);
     m_threads_lock = true;
     for (uint32_t i = 0; i < ARRAY_LEN(m_threads); i++) {
         if (!m_threads[i].in_use) continue;
@@ -212,7 +212,7 @@ void Trigger::harvest_threads()
 struct Trigger::Thread *Trigger::alloc_thread()
 {
     while (true) {
-        while (m_threads_lock) usleep(100);
+        while (m_threads_lock) usleep(10);
         m_threads_lock = true;
         for (uint32_t i = 0; i < ARRAY_LEN(m_threads); i++) {
             if (!m_threads[i].in_use) {
@@ -229,7 +229,7 @@ struct Trigger::Thread *Trigger::alloc_thread()
             }
         }
         m_threads_lock = false;
-        usleep(100);
+        usleep(10);
     }
 }
 
@@ -268,7 +268,7 @@ bool Trigger::trigger_accept(int fd, const struct sockaddr_un *addr, const struc
     ASSERT(0 == pthread_attr_destroy(&thread->attr));
     LOG("Waiting for handler thread: %lX", thread->thread_id);
     while (!params.started) {
-        usleep(100);
+        usleep(10);
     }
     thread->running = true;
     LOG("Done waiting for handler thread: %lX", thread->thread_id);
@@ -484,7 +484,7 @@ void Trigger::want(const char *input_path, const struct TargetContext *target_ct
             if (it2->second == REQUESTED_FILE_STATUS_READY) {
                 break;
             }
-            usleep(100);
+            usleep(10);
         }
         break;
     }
@@ -550,11 +550,14 @@ void Trigger::Execute(const char *cmd, const struct TargetContext *target_ctx)//
     const pid_t child = fork();
     char *const cwd = get_current_dir_name();
 
+    auto ld_preload_full = std::string(cwd) + std::string("/") + std::string(LD_PRELOAD_PATH);
     auto path                           =    std::string("PATH=") + std::string(getenv("PATH"));
-    auto ld_preload                     =    std::string("LD_PRELOAD=") + std::string(cwd) + std::string("/") + std::string(LD_PRELOAD_PATH);
+    auto ld_preload                     =    std::string("LD_PRELOAD=") + ld_preload_full;
     auto buildsome_master_unix_sockaddr =    std::string("BUILDSOME_MASTER_UNIX_SOCKADDR=") + std::string(sockAddr);
     auto buildsome_job_id               =    std::string("BUILDSOME_JOB_ID=") + std::to_string(child_idx);
     auto buildsome_root_filter          =    std::string("BUILDSOME_ROOT_FILTER=") + std::string(cwd);
+//  , ("DYLD_FORCE_FLAT_NAMESPACE", "1")
+    auto dyld_insert_libraries          =    std::string("DYLD_INSERT_LIBRARIES=") + ld_preload_full;
 
     const char *envir[] = {
         path.c_str(),
@@ -562,6 +565,9 @@ void Trigger::Execute(const char *cmd, const struct TargetContext *target_ctx)//
         buildsome_master_unix_sockaddr.c_str(),
         buildsome_job_id.c_str(),
         buildsome_root_filter.c_str(),
+        dyld_insert_libraries.c_str(),
+        "DYLD_FORCE_FLAT_NAMESPACE=1",
+        "PYTHONDONTWRITEBYTECODE=1",
     };
     free(cwd);
     if (0 == child) {
@@ -590,7 +596,7 @@ void Trigger::Execute(const char *cmd, const struct TargetContext *target_ctx)//
 
     while (!wait_for(child, cmd)) {
         this->trigger_accept(sock_fd, &addr, target_ctx);
-        usleep(100);
+        usleep(10);
     }
     LOG("Done accepting, waiting for child: %d", child);
     LOG("Child %d terminated", child);

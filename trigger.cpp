@@ -39,8 +39,8 @@ Trigger::Trigger(FileRequestCb *cb) {
     m_threads_lock = false;
 }
 
-static char putenv_buffers[1024][1024];
-static uint32_t putenv_pos = 0;
+// static char putenv_buffers[1024][1024];
+// static uint32_t putenv_pos = 0;
 
 #define PUTENV(fmt, ...) do {                                           \
         char *result = putenv_buffers[putenv_pos];                      \
@@ -548,6 +548,22 @@ void Trigger::Execute(const char *cmd, const struct TargetContext *target_ctx)//
     int parent_child_pipe[2];
     ASSERT(0 == pipe(parent_child_pipe));
     const pid_t child = fork();
+    char *const cwd = get_current_dir_name();
+
+    auto path                           =    std::string("PATH=") + std::string(getenv("PATH"));
+    auto ld_preload                     =    std::string("LD_PRELOAD=") + std::string(cwd) + std::string("/") + std::string(LD_PRELOAD_PATH);
+    auto buildsome_master_unix_sockaddr =    std::string("BUILDSOME_MASTER_UNIX_SOCKADDR=") + std::string(sockAddr);
+    auto buildsome_job_id               =    std::string("BUILDSOME_JOB_ID=") + std::to_string(child_idx);
+    auto buildsome_root_filter          =    std::string("BUILDSOME_ROOT_FILTER=") + std::string(cwd);
+
+    const char *envir[] = {
+        path.c_str(),
+        ld_preload.c_str(),
+        buildsome_master_unix_sockaddr.c_str(),
+        buildsome_job_id.c_str(),
+        buildsome_root_filter.c_str(),
+    };
+    free(cwd);
     if (0 == child) {
         close(parent_child_pipe[1]);
         LOG("Waiting for parent...");
@@ -556,14 +572,8 @@ void Trigger::Execute(const char *cmd, const struct TargetContext *target_ctx)//
         read(parent_child_pipe[0], &yup, sizeof(yup));
         LOG("Starting...");
 
-        char *const cwd = get_current_dir_name();
-        PUTENV("LD_PRELOAD=%s/%s", cwd, LD_PRELOAD_PATH);
-        PUTENV("BUILDSOME_MASTER_UNIX_SOCKADDR=%s", sockAddr.c_str());
-        PUTENV("BUILDSOME_JOB_ID=%lu", child_idx);
-        PUTENV("BUILDSOME_ROOT_FILTER=%s", cwd);
-        free(cwd);
         const char *const args[] = { SHELL_EXE_PATH, "-c", cmd, NULL };
-        execvp("/bin/sh", (char *const*)args);
+        execvpe("/bin/sh", (char *const*)args, (char *const*)envir);
         PANIC("exec failed?!");
     }
 

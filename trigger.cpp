@@ -543,7 +543,7 @@ void Trigger::Execute(const char *cmd, const struct TargetContext *target_ctx)//
 
 
     LOG("Forking child: %s", cmd);
-    std::cerr << "Execute: " << cmd << std::endl;
+    std::cerr << "Execute: '" << cmd << "'" << std::endl;
 
     int parent_child_pipe[2];
     ASSERT(0 == pipe(parent_child_pipe));
@@ -578,7 +578,8 @@ void Trigger::Execute(const char *cmd, const struct TargetContext *target_ctx)//
         read(parent_child_pipe[0], &yup, sizeof(yup));
         LOG("Starting...");
 
-        const char *const args[] = { SHELL_EXE_PATH, "-c", cmd, NULL };
+        close(parent_child_pipe[0]);
+        const char *const args[] = { SHELL_EXE_PATH, "-xc", cmd, NULL };
         execvpe("/bin/sh", (char *const*)args, (char *const*)envir);
         PANIC("exec failed?!");
     }

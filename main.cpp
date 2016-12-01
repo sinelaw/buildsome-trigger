@@ -47,10 +47,14 @@ static uint32_t read_multi_line(int fd, char *output, uint32_t output_max_size)
     const uint32_t lines_count = strtoul(output, &endptr, 10);
     ASSERT(endptr == output + strlen(output));
     char *cur = output;
+    LOG("Reading %u lines", lines_count);
     for (uint32_t i = 0; i < lines_count; i++) {
-        const uint32_t line_read_size = read_line(fd, cur, output_max_size - (cur - output));
+        const uint32_t line_read_size = read_line(fd, cur, output_max_size - (cur - output) - 1);
         cur += line_read_size;
+        *cur = '\n';
+        cur++;
     }
+    *cur = '\0';
     return cur - output;
 }
 

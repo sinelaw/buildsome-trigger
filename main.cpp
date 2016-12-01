@@ -72,20 +72,25 @@ static void query(const char *const build_target, const struct TargetContext *ta
 
     char target_cmd[0x8000];
     const uint32_t cmd_size = read_multi_line(pipefd_to_parent[0], target_cmd, ARRAY_LEN(target_cmd));
-    if (cmd_size == 0) {
-        query_lock = false;
-        return;
-    }
     char target_inputs[0x1000];
     const uint32_t inputs_size = read_multi_line(pipefd_to_parent[0], target_inputs, ARRAY_LEN(target_inputs));
-    AVOID_UNUSED(inputs_size);
     char target_outputs[0x1000];
     const uint32_t outputs_size = read_multi_line(pipefd_to_parent[0], target_outputs, ARRAY_LEN(target_outputs));
     AVOID_UNUSED(outputs_size);
     LOG("For query: '%s', got:\ncmd = '%s'\ninputs = '%s'\noutputs = '%s'", build_target, target_cmd, target_inputs, target_outputs);
     query_lock = false;
+    char *input_cur = target_inputs;
+    for (uint32_t i = 0; i < inputs_size; i++) {
+        if (target_inputs[i] != '\n') continue;
+        target_inputs[i] = '\0';
+        LOG("Wanting: %s", input_cur);
+        trigger->want(input_cur, target_ctx);
+        input_cur = &target_inputs[i + 1];
+    }
     // WRITE("Got: '" << target_cmd << "'");
-    trigger->Execute(target_cmd, target_ctx);
+    if (cmd_size > 0) {
+        trigger->Execute(target_cmd, target_ctx);
+    }
 }
 
 void file_request(const char *input_path, const struct TargetContext *target_ctx)

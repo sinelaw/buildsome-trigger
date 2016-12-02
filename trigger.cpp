@@ -36,6 +36,7 @@ Trigger::Trigger(FileRequestCb *cb) {
         m_threads[i].in_use = false;
         m_threads[i].running = false;
     }
+    m_free_threads = ARRAY_LEN(m_threads);
     m_threads_lock = false;
 }
 
@@ -191,10 +192,25 @@ void *thread_start(void *arg)
     return NULL;
 }
 
+void Trigger::take_thread_lock()
+{
+    bool unlocked = false;
+    while (!__atomic_compare_exchange_n(&m_threads_lock, &unlocked, true, true, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+        usleep(10);
+    }
+    ASSERT(m_threads_lock == true);
+}
+
+void Trigger::release_thread_lock()
+{
+    bool unlocked = false;
+    __atomic_store(&m_threads_lock, &unlocked, __ATOMIC_RELAXED);
+}
+
 void Trigger::harvest_threads()
 {
-    while (m_threads_lock) usleep(10);
-    m_threads_lock = true;
+    if (m_free_threads > 0) return;
+    this->take_thread_lock();
     for (uint32_t i = 0; i < ARRAY_LEN(m_threads); i++) {
         if (!m_threads[i].in_use) continue;
         if (!m_threads[i].running) continue;
@@ -202,20 +218,23 @@ void Trigger::harvest_threads()
         if (0 == pthread_tryjoin_np(m_threads[i].thread_id, &res)) {
             m_threads[i].running = false;
             m_threads[i].in_use = false;
+            m_free_threads++;
+            ASSERT(m_free_threads < ARRAY_LEN(m_threads));
             connections_completed++;
             LOG("connections_accepted: %lu, connections_completed: %lu", connections_accepted, connections_completed);
         }
     }
-    m_threads_lock = false;
+    this->release_thread_lock();
 }
 
 struct Trigger::Thread *Trigger::alloc_thread()
 {
     while (true) {
-        while (m_threads_lock) usleep(10);
-        m_threads_lock = true;
+        this->take_thread_lock();
         for (uint32_t i = 0; i < ARRAY_LEN(m_threads); i++) {
             if (!m_threads[i].in_use) {
+                ASSERT(m_free_threads > 0);
+                m_free_threads--;
                 m_threads[i].in_use = true;
                 m_threads_lock = false;
                 return &m_threads[i];
@@ -228,7 +247,7 @@ struct Trigger::Thread *Trigger::alloc_thread()
                 return &m_threads[i];
             }
         }
-        m_threads_lock = false;
+        this->release_thread_lock();
         usleep(10);
     }
 }
@@ -579,7 +598,7 @@ void Trigger::Execute(const char *cmd, const struct TargetContext *target_ctx)//
         LOG("Starting...");
 
         close(parent_child_pipe[0]);
-        const char *const args[] = { SHELL_EXE_PATH, "-xc", cmd, NULL };
+        const char *const args[] = { SHELL_EXE_PATH, "-c", cmd, NULL };
         execvpe("/bin/sh", (char *const*)args, (char *const*)envir);
         PANIC("exec failed?!");
     }

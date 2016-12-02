@@ -32,7 +32,7 @@ static inline void panic(void) {
 
 static volatile bool log_lock = false;
 
-#define DEBUG
+/* #define DEBUG */
 
 #ifdef DEBUG
 
@@ -94,6 +94,8 @@ public:
 private:
 
     void harvest_threads();
+    void take_thread_lock();
+    void release_thread_lock();
 
     std::map<FilePath, RequestedFileStatus> m_fileStatus;
     FileRequestCb *m_cb;
@@ -108,6 +110,8 @@ private:
         bool running;
     };
 
+
+    uint32_t m_free_threads;
     struct Thread m_threads[2048];
 
     struct Thread *alloc_thread();

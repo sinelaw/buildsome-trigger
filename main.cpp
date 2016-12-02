@@ -14,10 +14,13 @@ extern "C" {
 static Trigger *trigger;
 static int pipefd_to_child[2];
 static int pipefd_to_parent[2];
-#define WRITE(str)                                      \
-    LOG("WRITE: %s", str);                              \
-    write(pipefd_to_child[1], str, strlen(str));        \
-    write(pipefd_to_child[1], "\n", strlen("\n"))
+#define WRITE(str)                                                      \
+    do {                                                                \
+        LOG("WRITE: %s", str);                                          \
+        uint32_t _len_ = strlen(str);                                   \
+        ASSERT(_len_ == write(pipefd_to_child[1], str, strlen(str)));   \
+        ASSERT(1 == write(pipefd_to_child[1], "\n", strlen("\n")));     \
+    } while (0)
 
 static uint32_t read_line(int fd, char *output, uint32_t output_max_size)
 {

@@ -5,8 +5,12 @@ clean:
 	rm *.o trigger fs_override.so
 
 WARNINGS=-Wswitch-enum -Wall -Werror -Wextra
-CXX=g++ -g -no-pie ${WARNINGS} -std=c++11 -pthread -O2
-CC=gcc -g -no-pie ${WARNINGS} -std=gnu11
+GPP=g++ -no-pie
+GCC=gcc -no-pie
+CLANGPP=clang++
+
+CXX=${GPP} -g ${WARNINGS} -std=c++11 -pthread -O3
+CC=${GCC} -g ${WARNINGS} -std=gnu11
 
 trigger: main.cpp trigger.o
 	${CXX} $^ -o "$@"

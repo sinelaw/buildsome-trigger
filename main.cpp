@@ -9,6 +9,8 @@ extern "C" {
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 }
 
 static Trigger *trigger;
@@ -79,7 +81,6 @@ static void query(const char *const build_target, const struct TargetContext *ta
     const uint32_t inputs_size = read_multi_line(pipefd_to_parent[0], target_inputs, ARRAY_LEN(target_inputs));
     char target_outputs[0x1000];
     const uint32_t outputs_size = read_multi_line(pipefd_to_parent[0], target_outputs, ARRAY_LEN(target_outputs));
-    AVOID_UNUSED(outputs_size);
     LOG("For query: '%s', got:\ncmd = '%s'\ninputs = '%s'\noutputs = '%s'", build_target, target_cmd, target_inputs, target_outputs);
     query_lock = false;
     char *input_cur = target_inputs;
@@ -89,6 +90,24 @@ static void query(const char *const build_target, const struct TargetContext *ta
         LOG("Wanting: %s", input_cur);
         trigger->want(input_cur, target_ctx);
         input_cur = &target_inputs[i + 1];
+    }
+    char *output_cur = target_outputs;
+    for (uint32_t i = 0; i < outputs_size; i++) {
+        if (target_outputs[i] != '\n') continue;
+        target_outputs[i] = '\0';
+        struct stat output_file_stat;
+        if (0 == stat(output_cur, &output_file_stat)) {
+            if (output_file_stat.st_mode & S_IFDIR) {
+                LOG("rmdir: %s", output_cur);
+                ASSERT(0 == rmdir(output_cur));
+            } else {
+                LOG("Unlink: %s", output_cur);
+                ASSERT(0 == unlink(output_cur));
+            }
+        } else {
+            ASSERT(ENOENT == errno);
+        }
+        output_cur = &target_outputs[i + 1];
     }
     // WRITE("Got: '" << target_cmd << "'");
     if (cmd_size > 0) {

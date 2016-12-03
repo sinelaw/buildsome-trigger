@@ -11,6 +11,7 @@ extern "C" {
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <ftw.h>
 }
 
 static Trigger *trigger;
@@ -63,6 +64,28 @@ static uint32_t read_multi_line(int fd, char *output, uint32_t output_max_size)
     return cur - output;
 }
 
+static int remove_fn(const char *fpath, const struct stat *sb,
+                     int typeflag, struct FTW *ftwbuf)
+{
+    AVOID_UNUSED(sb);
+    AVOID_UNUSED(ftwbuf);
+    if (typeflag & FTW_D) {
+        LOG("rmdir: %s", fpath);
+        ASSERT(0 == rmdir(fpath));
+    } else {
+        LOG("unlink: %s", fpath);
+        ASSERT(0 == unlink(fpath));
+    }
+    return 0;
+}
+
+static void remove_dir_recursively(const char *dirpath)
+{
+    const int nopenfd = 10;
+    const int res = nftw(dirpath, remove_fn, nopenfd, FTW_DEPTH);
+    ASSERT(0 == res);
+}
+
 static void query(const char *const build_target, const struct TargetContext *target_ctx)
 {
     static volatile bool query_lock = false;
@@ -98,8 +121,7 @@ static void query(const char *const build_target, const struct TargetContext *ta
         struct stat output_file_stat;
         if (0 == stat(output_cur, &output_file_stat)) {
             if (output_file_stat.st_mode & S_IFDIR) {
-                LOG("rmdir: %s", output_cur);
-                ASSERT(0 == rmdir(output_cur));
+                remove_dir_recursively(output_cur);
             } else {
                 LOG("Unlink: %s", output_cur);
                 ASSERT(0 == unlink(output_cur));

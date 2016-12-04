@@ -463,37 +463,45 @@ static void get_input_paths(enum func func_id, const char *buf, uint32_t buf_siz
 
 RequestedFileStatus Trigger::get_status(const char *input_path)
 {
+    m_map_mutex.lock();
     auto it = m_fileStatus.find(input_path);
-    if (it == m_fileStatus.end()) {
-        return REQUESTED_FILE_STATUS_UNKNOWN;
-    }
-    return it->second;
+    const RequestedFileStatus status
+        = (it == m_fileStatus.end())
+        ? REQUESTED_FILE_STATUS_UNKNOWN
+        : it->second;
+    m_map_mutex.unlock();
+    return status;
 }
 
 void Trigger::mark_pending(const char *file_path)
 {
+    m_map_mutex.lock();
     auto it = m_fileStatus.find(file_path);
     if (it == m_fileStatus.end()) {
         m_fileStatus[file_path] = REQUESTED_FILE_STATUS_PENDING;
-        return;
+    } else {
+        const RequestedFileStatus status = it->second;
+        switch (status) {
+        case REQUESTED_FILE_STATUS_READY: PANIC("Can't mark pending, already ready!");
+        case REQUESTED_FILE_STATUS_UNKNOWN:
+            m_fileStatus[file_path] = REQUESTED_FILE_STATUS_PENDING;
+            break;
+        case REQUESTED_FILE_STATUS_PENDING:
+            break;
+        default: PANIC("enum");
+        }
     }
-    switch (it->second) {
-    case REQUESTED_FILE_STATUS_READY: PANIC("Can't mark pending, already ready!");
-    case REQUESTED_FILE_STATUS_UNKNOWN:
-        m_fileStatus[file_path] = REQUESTED_FILE_STATUS_PENDING;
-        break;
-    case REQUESTED_FILE_STATUS_PENDING:
-        break;
-    default: PANIC("enum");
-    }
+    m_map_mutex.unlock();
 }
 
 void Trigger::mark_ready(const char *file_path)
 {
+    m_map_mutex.lock();
     auto it = m_fileStatus.find(file_path);
     ASSERT(it != m_fileStatus.end());
-    ASSERT(it->second == REQUESTED_FILE_STATUS_PENDING);
+    ASSERT(it->second == REQUESTED_FILE_STATUS_PENDING || it->second == REQUESTED_FILE_STATUS_READY);
     m_fileStatus[file_path] = REQUESTED_FILE_STATUS_READY;
+    m_map_mutex.unlock();
 }
 
 void Trigger::want(const char *input_path, const struct TargetContext *target_ctx)
@@ -514,16 +522,19 @@ void Trigger::want(const char *input_path, const struct TargetContext *target_ct
     switch (this->get_status(input_path)) {
     case REQUESTED_FILE_STATUS_READY: return;
     case REQUESTED_FILE_STATUS_UNKNOWN:
-        m_fileStatus[input_path] = REQUESTED_FILE_STATUS_PENDING;
+        this->mark_pending(input_path);
         m_cb(input_path, &new_target_ctx);
-        m_fileStatus[input_path] = REQUESTED_FILE_STATUS_READY;
+        this->mark_ready(input_path);
         break;
     case REQUESTED_FILE_STATUS_PENDING: {
         LOG("Waiting for: '%s'...", input_path);
         while (true) {
+            m_map_mutex.lock();
             auto it2 = m_fileStatus.find(input_path);
             ASSERT(it2 != m_fileStatus.end());
-            if (it2->second == REQUESTED_FILE_STATUS_READY) {
+            const RequestedFileStatus status = it2->second;
+            m_map_mutex.unlock();
+            if (status == REQUESTED_FILE_STATUS_READY) {
                 break;
             }
             usleep(10);

@@ -3,6 +3,7 @@
 #include <cinttypes>
 #include <string>
 #include <map>
+#include <mutex>
 
 extern "C" {
 #include "fshook/protocol.h"
@@ -103,6 +104,8 @@ private:
     void release_thread_lock();
 
     std::map<FilePath, RequestedFileStatus> m_fileStatus;
+    std::mutex m_map_mutex;
+
     FileRequestCb *m_cb;
     uint64_t m_child_idx;
     volatile bool m_threads_lock;

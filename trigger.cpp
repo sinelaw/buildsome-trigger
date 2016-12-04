@@ -564,7 +564,7 @@ void Trigger::Execute(const char *cmd, const struct TargetContext *target_ctx)//
 
 
     LOG("Forking child: %s", cmd);
-    std::cerr << "Execute: '" << cmd << "'" << std::endl;
+    std::cerr << "Build: '" << target_ctx->path << "'" << std::endl;
 
     int parent_child_pipe[2];
     ASSERT(0 == pipe(parent_child_pipe));
@@ -625,5 +625,5 @@ void Trigger::Execute(const char *cmd, const struct TargetContext *target_ctx)//
     LOG("Child %d terminated", child);
     close(sock_fd);
 
-    std::cerr << "Execute [done]: " << cmd << std::endl;
+    std::cerr << "Build: '" << target_ctx->path << "' - Done" << std::endl;
 }

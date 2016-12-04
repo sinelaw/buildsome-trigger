@@ -498,6 +498,7 @@ void Trigger::mark_ready(const char *file_path)
 {
     m_map_mutex.lock();
     auto it = m_fileStatus.find(file_path);
+    LOG("marking ready: %s", file_path);
     ASSERT(it != m_fileStatus.end());
     ASSERT(it->second == REQUESTED_FILE_STATUS_PENDING || it->second == REQUESTED_FILE_STATUS_READY);
     m_fileStatus[file_path] = REQUESTED_FILE_STATUS_READY;

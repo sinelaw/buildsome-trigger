@@ -301,7 +301,7 @@ struct OperationPaths {
     uint32_t output_count;
 };
 
-static void safer_dirname(const char *path, char *dirname, uint32_t dirname_max_size)
+void safer_dirname(const char *path, char *dirname, uint32_t dirname_max_size)
 {
     const uint32_t len = strlen(path);
 
@@ -461,14 +461,8 @@ static void get_input_paths(enum func func_id, const char *buf, uint32_t buf_siz
     }
 }
 
-void Trigger::want(const char *input_path, const struct TargetContext *target_ctx)
+RequestedFileStatus Trigger::get_status(const char *input_path, const struct TargetContext *target_ctx)
 {
-    LOG("WANT: %s", input_path);
-    auto it = m_fileStatus.find(input_path);
-    const struct TargetContext new_target_ctx = {
-        .path = input_path,
-        .parent = target_ctx,
-    };
     bool is_nesting = false;;
     const struct TargetContext *cur = target_ctx;
     while (cur) {
@@ -480,15 +474,23 @@ void Trigger::want(const char *input_path, const struct TargetContext *target_ct
     }
     /* in child of parent building this path, just release it */
     if (is_nesting) {
-        return;
+        return REQUESTED_FILE_STATUS_READY;
     }
+    auto it = m_fileStatus.find(input_path);
     if (it == m_fileStatus.end()) {
-        m_fileStatus[input_path] = REQUESTED_FILE_STATUS_PENDING;
-        m_cb(input_path, &new_target_ctx);
-        m_fileStatus[input_path] = REQUESTED_FILE_STATUS_READY;
-        return;
+        return REQUESTED_FILE_STATUS_UNKNOWN;
     }
-    switch (it->second) {
+    return m_fileStatus[input_path];
+}
+
+void Trigger::want(const char *input_path, const struct TargetContext *target_ctx)
+{
+    const struct TargetContext new_target_ctx = {
+        .path = input_path,
+        .parent = target_ctx,
+    };
+    LOG("WANT: %s", input_path);
+    switch (this->get_status(input_path, target_ctx)) {
     case REQUESTED_FILE_STATUS_READY: return;
     case REQUESTED_FILE_STATUS_UNKNOWN:
         m_fileStatus[input_path] = REQUESTED_FILE_STATUS_PENDING;

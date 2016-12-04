@@ -118,6 +118,14 @@ static void query(const char *const build_target, const struct TargetContext *ta
     for (uint32_t i = 0; i < outputs_size; i++) {
         if (target_outputs[i] != '\n') continue;
         target_outputs[i] = '\0';
+        char output_path[0x1000];
+        LOG("OUTPUT: %s", output_cur);
+        safer_dirname(output_cur, output_path, ARRAY_LEN(output_path));
+        struct stat output_dir_stat;
+        if (0 != stat(output_path, &output_dir_stat)) {
+            ASSERT(ENOENT == errno);
+            trigger->want(output_path, target_ctx);
+        }
         struct stat output_file_stat;
         if (0 == stat(output_cur, &output_file_stat)) {
             if (output_file_stat.st_mode & S_IFDIR) {

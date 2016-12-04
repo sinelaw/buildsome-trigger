@@ -32,7 +32,7 @@ static inline void panic(void) {
 
 static volatile bool log_lock = false;
 
-#define DEBUG
+/* #define DEBUG */
 
 #ifdef DEBUG
 
@@ -50,6 +50,8 @@ static volatile bool log_lock = false;
 #define LOG(...) do { } while (0)
 
 #endif
+
+void safer_dirname(const char *path, char *dirname, uint32_t dirname_max_size);
 
 struct TargetContext {
     const char *path;
@@ -88,6 +90,7 @@ public:
     /* Executes the given command while hooking its file accesses. */
     void Execute(const char *cmd, const struct TargetContext *); //, char *const argv[]);
 
+    RequestedFileStatus get_status(const char *file_path, const struct TargetContext *);
     void want(const char *file_path, const struct TargetContext *);
     void handle_connection(int connection_fd, const struct TargetContext *);
     bool trigger_accept(int fd, const struct sockaddr_un *addr, const struct TargetContext *);

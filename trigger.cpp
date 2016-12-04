@@ -461,26 +461,39 @@ static void get_input_paths(enum func func_id, const char *buf, uint32_t buf_siz
     }
 }
 
-RequestedFileStatus Trigger::get_status(const char *input_path, const struct TargetContext *target_ctx)
+RequestedFileStatus Trigger::get_status(const char *input_path)
 {
-    bool is_nesting = false;;
-    const struct TargetContext *cur = target_ctx;
-    while (cur) {
-        if (0 == strcmp(cur->path, input_path)) {
-            is_nesting = true;
-            break;
-        }
-        cur = cur->parent;
-    }
-    /* in child of parent building this path, just release it */
-    if (is_nesting) {
-        return REQUESTED_FILE_STATUS_READY;
-    }
     auto it = m_fileStatus.find(input_path);
     if (it == m_fileStatus.end()) {
         return REQUESTED_FILE_STATUS_UNKNOWN;
     }
-    return m_fileStatus[input_path];
+    return it->second;
+}
+
+void Trigger::mark_pending(const char *file_path)
+{
+    auto it = m_fileStatus.find(file_path);
+    if (it == m_fileStatus.end()) {
+        m_fileStatus[file_path] = REQUESTED_FILE_STATUS_PENDING;
+        return;
+    }
+    switch (it->second) {
+    case REQUESTED_FILE_STATUS_READY: PANIC("Can't mark pending, already ready!");
+    case REQUESTED_FILE_STATUS_UNKNOWN:
+        m_fileStatus[file_path] = REQUESTED_FILE_STATUS_PENDING;
+        break;
+    case REQUESTED_FILE_STATUS_PENDING:
+        break;
+    default: PANIC("enum");
+    }
+}
+
+void Trigger::mark_ready(const char *file_path)
+{
+    auto it = m_fileStatus.find(file_path);
+    ASSERT(it != m_fileStatus.end());
+    ASSERT(it->second == REQUESTED_FILE_STATUS_PENDING);
+    m_fileStatus[file_path] = REQUESTED_FILE_STATUS_READY;
 }
 
 void Trigger::want(const char *input_path, const struct TargetContext *target_ctx)
@@ -490,7 +503,15 @@ void Trigger::want(const char *input_path, const struct TargetContext *target_ct
         .parent = target_ctx,
     };
     LOG("WANT: %s", input_path);
-    switch (this->get_status(input_path, target_ctx)) {
+    const struct TargetContext *cur = target_ctx;
+    while (cur) {
+        if (0 == strcmp(cur->path, input_path)) {
+            /* in child of parent building this path, just release it */
+            return;
+        }
+        cur = cur->parent;
+    }
+    switch (this->get_status(input_path)) {
     case REQUESTED_FILE_STATUS_READY: return;
     case REQUESTED_FILE_STATUS_UNKNOWN:
         m_fileStatus[input_path] = REQUESTED_FILE_STATUS_PENDING;
@@ -601,7 +622,7 @@ void Trigger::Execute(const char *cmd, const struct TargetContext *target_ctx)//
         LOG("Starting...");
 
         close(parent_child_pipe[0]);
-        const char *const args[] = { SHELL_EXE_PATH, "-c", cmd, NULL };
+        const char *const args[] = { SHELL_EXE_PATH, "-ec", cmd, NULL };
         execvpe("/bin/sh", (char *const*)args, (char *const*)envir);
         PANIC("exec failed?!");
     }

@@ -90,7 +90,9 @@ public:
     /* Executes the given command while hooking its file accesses. */
     void Execute(const char *cmd, const struct TargetContext *); //, char *const argv[]);
 
-    RequestedFileStatus get_status(const char *file_path, const struct TargetContext *);
+    RequestedFileStatus get_status(const char *file_path);
+    void mark_pending(const char *file_path);
+    void mark_ready(const char *file_path);
     void want(const char *file_path, const struct TargetContext *);
     void handle_connection(int connection_fd, const struct TargetContext *);
     bool trigger_accept(int fd, const struct sockaddr_un *addr, const struct TargetContext *);

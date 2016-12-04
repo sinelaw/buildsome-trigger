@@ -128,11 +128,24 @@ static void query(const char *const build_target, const struct TargetContext *ta
         }
         struct stat output_file_stat;
         if (0 == stat(output_cur, &output_file_stat)) {
-            if (output_file_stat.st_mode & S_IFDIR) {
-                remove_dir_recursively(output_cur);
-            } else {
-                LOG("Unlink: %s", output_cur);
-                ASSERT(0 == unlink(output_cur));
+            switch (trigger->get_status(output_cur)) {
+            case REQUESTED_FILE_STATUS_UNKNOWN:
+                LOG("%s unknown, marking as pending", output_cur);
+                trigger->mark_pending(output_cur);
+                // fall through
+            case REQUESTED_FILE_STATUS_PENDING:
+                LOG("removing %s", output_cur);
+                if (output_file_stat.st_mode & S_IFDIR) {
+                    remove_dir_recursively(output_cur);
+                } else {
+                    LOG("Unlink: %s", output_cur);
+                    ASSERT(0 == unlink(output_cur));
+                }
+                break;
+            case REQUESTED_FILE_STATUS_READY:
+                LOG("%s is ready", output_cur);
+                break;
+            default: PANIC("Unknown enum");
             }
         } else {
             ASSERT(ENOENT == errno);
@@ -142,6 +155,12 @@ static void query(const char *const build_target, const struct TargetContext *ta
     // WRITE("Got: '" << target_cmd << "'");
     if (cmd_size > 0) {
         trigger->Execute(target_cmd, target_ctx);
+    }
+    output_cur = target_outputs;
+    for (uint32_t i = 0; i < outputs_size; i++) {
+        if (target_outputs[i] != '\0') continue;
+        trigger->mark_ready(output_cur);
+        output_cur = &target_outputs[i + 1];
     }
 }
 

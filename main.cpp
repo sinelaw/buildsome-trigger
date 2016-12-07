@@ -116,22 +116,39 @@ static void query(const char *const build_target, const struct TargetContext *ta
     }
     uint32_t num_outputs = 0;
     uint32_t ready_outputs = 0;
+
+
+    struct TargetContext new_target_ctxs[20];
+    const struct TargetContext *cur_target_ctx = target_ctx;
+
     char *output_cur = target_outputs;
     for (uint32_t i = 0; i < outputs_size; i++) {
         if (target_outputs[i] != '\n') continue;
         target_outputs[i] = '\0';
-        num_outputs++;
 
-        LOG("OUTPUT: %s", output_cur);
+        ASSERT(num_outputs < ARRAY_LEN(new_target_ctxs));
+        new_target_ctxs[num_outputs].path = output_cur;
+        new_target_ctxs[num_outputs].parent = cur_target_ctx;
+        cur_target_ctx = &new_target_ctxs[num_outputs];
+
+        num_outputs++;
+        output_cur = &target_outputs[i + 1];
+    }
+
+    for (const struct TargetContext *output = cur_target_ctx;
+         output != target_ctx;
+         output = output->parent)
+    {
+        LOG("OUTPUT: %s", output->path);
         char output_path[0x1000];
-        safer_dirname(output_cur, output_path, ARRAY_LEN(output_path));
+        safer_dirname(output->path, output_path, ARRAY_LEN(output_path));
         struct stat output_dir_stat;
         if (0 != stat(output_path, &output_dir_stat)) {
             ASSERT(ENOENT == errno);
             while (true) {
                 switch (trigger->get_status(output_path)) {
                 case REQUESTED_FILE_STATUS_UNKNOWN:
-                    trigger->want(output_path, target_ctx);
+                    trigger->want(output_path, cur_target_ctx);
                     continue;
                 case REQUESTED_FILE_STATUS_PENDING:
                     usleep(100);
@@ -156,40 +173,40 @@ static void query(const char *const build_target, const struct TargetContext *ta
         }
 
         struct stat output_file_stat;
-        switch (trigger->get_status(output_cur)) {
+        switch (trigger->get_status(output->path)) {
         case REQUESTED_FILE_STATUS_UNKNOWN:
-            LOG("%s unknown, marking as pending", output_cur);
-            trigger->mark_pending(output_cur);
+            LOG("%s unknown, marking as pending", output->path);
+            trigger->mark_pending(output->path);
             // fall through
         case REQUESTED_FILE_STATUS_PENDING:
-            if (0 == stat(output_cur, &output_file_stat)) {
-                LOG("removing %s", output_cur);
-                std::cerr << "Delete: " << output_cur << std::endl;
+            if (0 == stat(output->path, &output_file_stat)) {
+                LOG("removing %s", output->path);
+                std::cerr << "Delete: " << output->path << std::endl;
                 if (output_file_stat.st_mode & S_IFDIR) {
-                    remove_dir_recursively(output_cur);
+                    remove_dir_recursively(output->path);
                 } else {
-                    LOG("Unlink: %s", output_cur);
-                    ASSERT(0 == unlink(output_cur));
+                    LOG("Unlink: %s", output->path);
+                    ASSERT(0 == unlink(output->path));
                 }
             } else {
                 ASSERT(ENOENT == errno);
             }
             break;
         case REQUESTED_FILE_STATUS_READY:
-            LOG("%s is ready", output_cur);
+            LOG("%s is ready", output->path);
             ready_outputs++;
             break;
         default: PANIC("Unknown enum");
         }
-        output_cur = &target_outputs[i + 1];
     }
+
     ASSERT((ready_outputs == 0) || (ready_outputs == num_outputs));
     if (ready_outputs == num_outputs) {
         return;
     }
     // WRITE("Got: '" << target_cmd << "'");
     if (cmd_size > 0) {
-        trigger->Execute(target_cmd, target_ctx);
+        trigger->Execute(target_cmd, cur_target_ctx);
     }
     output_cur = target_outputs;
     for (uint32_t i = 0; i < outputs_size; i++) {

@@ -309,7 +309,7 @@ void safer_dirname(const char *path, char *dirname, uint32_t dirname_max_size)
         if (path[i - 1] == '/') {
             ASSERT(i < dirname_max_size);
             memcpy(dirname, path, i - 1);
-            dirname[i] = '\0';
+            dirname[i - 1] = '\0';
             return;
         }
     }
@@ -475,6 +475,7 @@ RequestedFileStatus Trigger::get_status(const char *input_path)
 
 void Trigger::mark_pending(const char *file_path)
 {
+    LOG("Mark pending: %s...", file_path);
     m_map_mutex.lock();
     auto it = m_fileStatus.find(file_path);
     if (it == m_fileStatus.end()) {
@@ -492,10 +493,12 @@ void Trigger::mark_pending(const char *file_path)
         }
     }
     m_map_mutex.unlock();
+    LOG("Marked pending: %s", file_path);
 }
 
 void Trigger::mark_ready(const char *file_path)
 {
+    LOG("Mark ready: %s...", file_path);
     m_map_mutex.lock();
     auto it = m_fileStatus.find(file_path);
     LOG("marking ready: %s", file_path);
@@ -503,6 +506,7 @@ void Trigger::mark_ready(const char *file_path)
     ASSERT(it->second == REQUESTED_FILE_STATUS_PENDING || it->second == REQUESTED_FILE_STATUS_READY);
     m_fileStatus[file_path] = REQUESTED_FILE_STATUS_READY;
     m_map_mutex.unlock();
+    LOG("Marked ready: %s", file_path);
 }
 
 void Trigger::want(const char *input_path, const struct TargetContext *target_ctx)

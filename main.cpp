@@ -114,18 +114,47 @@ static void query(const char *const build_target, const struct TargetContext *ta
         trigger->want(input_cur, target_ctx);
         input_cur = &target_inputs[i + 1];
     }
+    uint32_t num_outputs = 0;
+    uint32_t ready_outputs = 0;
     char *output_cur = target_outputs;
     for (uint32_t i = 0; i < outputs_size; i++) {
         if (target_outputs[i] != '\n') continue;
         target_outputs[i] = '\0';
-        char output_path[0x1000];
+        num_outputs++;
+
         LOG("OUTPUT: %s", output_cur);
+        char output_path[0x1000];
         safer_dirname(output_cur, output_path, ARRAY_LEN(output_path));
         struct stat output_dir_stat;
         if (0 != stat(output_path, &output_dir_stat)) {
             ASSERT(ENOENT == errno);
-            trigger->want(output_path, target_ctx);
+            while (true) {
+                switch (trigger->get_status(output_path)) {
+                case REQUESTED_FILE_STATUS_UNKNOWN:
+                    trigger->want(output_path, target_ctx);
+                    continue;
+                case REQUESTED_FILE_STATUS_PENDING:
+                    usleep(100);
+                    continue;
+                case REQUESTED_FILE_STATUS_READY:
+                    break;
+                default: PANIC("enum");
+                }
+            }
+        } else {
+            switch (trigger->get_status(output_path)) {
+            case REQUESTED_FILE_STATUS_UNKNOWN:
+                trigger->mark_pending(output_path);
+                // fall through
+            case REQUESTED_FILE_STATUS_PENDING:
+                trigger->mark_ready(output_path);
+                break;
+            case REQUESTED_FILE_STATUS_READY:
+                break;
+            default: PANIC("enum");
+            }
         }
+
         struct stat output_file_stat;
         switch (trigger->get_status(output_cur)) {
         case REQUESTED_FILE_STATUS_UNKNOWN:
@@ -135,6 +164,7 @@ static void query(const char *const build_target, const struct TargetContext *ta
         case REQUESTED_FILE_STATUS_PENDING:
             if (0 == stat(output_cur, &output_file_stat)) {
                 LOG("removing %s", output_cur);
+                std::cerr << "Delete: " << output_cur << std::endl;
                 if (output_file_stat.st_mode & S_IFDIR) {
                     remove_dir_recursively(output_cur);
                 } else {
@@ -147,10 +177,15 @@ static void query(const char *const build_target, const struct TargetContext *ta
             break;
         case REQUESTED_FILE_STATUS_READY:
             LOG("%s is ready", output_cur);
+            ready_outputs++;
             break;
         default: PANIC("Unknown enum");
         }
         output_cur = &target_outputs[i + 1];
+    }
+    ASSERT((ready_outputs == 0) || (ready_outputs == num_outputs));
+    if (ready_outputs == num_outputs) {
+        return;
     }
     // WRITE("Got: '" << target_cmd << "'");
     if (cmd_size > 0) {

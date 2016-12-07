@@ -304,16 +304,20 @@ struct OperationPaths {
 void safer_dirname(const char *path, char *dirname, uint32_t dirname_max_size)
 {
     const uint32_t len = strlen(path);
-
+    dirname[0] = '\0';
     for (uint32_t i = len; i > 0; i--) {
         if (path[i - 1] == '/') {
             ASSERT(i < dirname_max_size);
             memcpy(dirname, path, i - 1);
             dirname[i - 1] = '\0';
-            return;
+            break;
         }
     }
-    dirname[0] = '\0';
+    if (dirname[0] == '\0') {
+        ASSERT(dirname_max_size >= 2);
+        dirname[0] = '.';
+        dirname[1] = '\0';
+    }
 }
 
 static void get_input_paths(enum func func_id, const char *buf, uint32_t buf_size,

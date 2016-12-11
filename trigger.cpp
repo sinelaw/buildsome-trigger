@@ -234,6 +234,7 @@ struct Trigger::Thread *Trigger::alloc_thread()
                     // ASSERT(join_res == EBUSY);
                     continue;
                 }
+            } else {
                 ASSERT(m_free_threads > 0);
                 m_free_threads--;
             }

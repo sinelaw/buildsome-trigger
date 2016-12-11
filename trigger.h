@@ -119,6 +119,7 @@ private:
     };
 
 
+    Thread *spawn(void *(*func)(void *ctx), void *ctx);
     uint32_t m_free_threads;
     struct Thread m_threads[2048];
 

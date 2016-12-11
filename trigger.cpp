@@ -256,6 +256,17 @@ struct Trigger::Thread *Trigger::alloc_thread()
     }
 }
 
+Trigger::Thread *Trigger::spawn(void *(*func)(void *ctx), void *ctx)
+{
+    Thread *const thread = this->alloc_thread();
+    ASSERT(0 == pthread_attr_init(&thread->attr));
+    ASSERT(0 == pthread_create(&thread->thread_id, &thread->attr,
+                               func, ctx));
+    ASSERT(0 == pthread_attr_destroy(&thread->attr));
+    return thread;
+}
+
+
 bool Trigger::trigger_accept(int fd, const struct sockaddr_un *addr, const struct TargetContext *target_ctx)
 {
     socklen_t addrlen = sizeof(struct sockaddr_un);
@@ -275,17 +286,13 @@ bool Trigger::trigger_accept(int fd, const struct sockaddr_un *addr, const struc
     connections_accepted++;
     LOG("Got connection, connections_accepted: %lu", connections_accepted);
 
-    Thread *const thread = this->alloc_thread();
     struct ConnectionParams params = {
         .trigger = this,
         .connection_fd = connection_fd,
         .started = false,
         .target_ctx = target_ctx,
     };
-    ASSERT(0 == pthread_attr_init(&thread->attr));
-    ASSERT(0 == pthread_create(&thread->thread_id, &thread->attr,
-                               &thread_start, &params));
-    ASSERT(0 == pthread_attr_destroy(&thread->attr));
+    Thread *const thread = this->spawn(&thread_start, &params);
     LOG("Waiting for handler thread: %lX", thread->thread_id);
     while (!params.started) {
         usleep(10);

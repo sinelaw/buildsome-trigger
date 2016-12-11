@@ -105,10 +105,10 @@ private:
 
     std::map<FilePath, RequestedFileStatus> m_fileStatus;
     std::mutex m_map_mutex;
+    std::mutex m_thread_mutex;
 
     FileRequestCb *m_cb;
     uint64_t m_child_idx;
-    volatile bool m_threads_lock;
 
     struct Thread {
         pthread_t thread_id;

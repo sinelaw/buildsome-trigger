@@ -37,7 +37,6 @@ Trigger::Trigger(FileRequestCb *cb) {
         m_threads[i].running = false;
     }
     m_free_threads = ARRAY_LEN(m_threads);
-    m_threads_lock = false;
 }
 
 // static char putenv_buffers[1024][1024];
@@ -194,18 +193,12 @@ void *thread_start(void *arg)
 
 void Trigger::take_thread_lock()
 {
-    bool unlocked = false;
-    while (!__atomic_compare_exchange_n(&m_threads_lock, &unlocked, true, true, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
-        unlocked = false;
-        usleep(10);
-    }
-    ASSERT(m_threads_lock == true);
+    m_thread_mutex.lock();
 }
 
 void Trigger::release_thread_lock()
 {
-    bool unlocked = false;
-    __atomic_store(&m_threads_lock, &unlocked, __ATOMIC_RELAXED);
+    m_thread_mutex.unlock();
 }
 
 void Trigger::harvest_threads()

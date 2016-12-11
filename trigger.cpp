@@ -196,6 +196,7 @@ void Trigger::take_thread_lock()
 {
     bool unlocked = false;
     while (!__atomic_compare_exchange_n(&m_threads_lock, &unlocked, true, true, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+        unlocked = false;
         usleep(10);
     }
     ASSERT(m_threads_lock == true);

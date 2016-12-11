@@ -18,5 +18,8 @@ trigger: main.cpp trigger.o
 trigger.o: trigger.cpp trigger.h
 	${CXX} -c "$<" -o "$@"
 
+reactor.o: reactor.cpp reactor.h
+	${CXX} -c "$<" -o "$@"
+
 fs_override.so: fshook/*.c fshook/*.h
 	${CC} -o "$@" -Winit-self -shared -fPIC -D_GNU_SOURCE fshook/*.c -ldl

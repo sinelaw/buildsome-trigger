@@ -232,20 +232,24 @@ struct Trigger::Thread *Trigger::alloc_thread()
     while (true) {
         this->take_thread_lock();
         for (uint32_t i = 0; i < ARRAY_LEN(m_threads); i++) {
-            if (!m_threads[i].in_use) {
+            if (m_threads[i].in_use) {
+                if (!m_threads[i].running) continue; /* started but not yet running, can't use it */
+                void *res;
+                const int join_res = pthread_tryjoin_np(m_threads[i].thread_id, &res);
+                if (0 != join_res) {
+                    // ASSERT(join_res == EBUSY);
+                    continue;
+                }
                 ASSERT(m_free_threads > 0);
                 m_free_threads--;
-                m_threads[i].in_use = true;
-                m_threads_lock = false;
-                return &m_threads[i];
             }
-            if (!m_threads[i].running) continue; /* started but not yet running, can't use it */
-            void *res;
-            if (0 == pthread_tryjoin_np(m_threads[i].thread_id, &res)) {
-                m_threads[i].running = false;
-                m_threads_lock = false;
-                return &m_threads[i];
-            }
+            // thread not in_use, or joined succesfully
+            Trigger::Thread *const thread = &m_threads[i];
+            thread->in_use = true;
+            thread->running = false;
+            thread->trigger = this;
+            this->release_thread_lock();
+            return thread;
         }
         this->release_thread_lock();
         usleep(10);
@@ -272,9 +276,6 @@ bool Trigger::trigger_accept(int fd, const struct sockaddr_un *addr, const struc
     LOG("Got connection, connections_accepted: %lu", connections_accepted);
 
     Thread *const thread = this->alloc_thread();
-    ASSERT(thread != nullptr);
-    ASSERT(thread->running == false);
-    thread->trigger = this;
     struct ConnectionParams params = {
         .trigger = this,
         .connection_fd = connection_fd,

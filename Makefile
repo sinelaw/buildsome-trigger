@@ -9,7 +9,7 @@ GPP=g++ -no-pie
 GCC=gcc -no-pie
 CLANGPP=clang++
 
-CXX=${GPP} -g ${WARNINGS} -std=c++11 -pthread -O3 -msse4.2
+CXX=${GPP} -g ${WARNINGS} -std=c++11 -pthread  -msse4.2
 CC=${GCC} -g ${WARNINGS} -std=gnu11
 
 trigger: main.cpp trigger.o

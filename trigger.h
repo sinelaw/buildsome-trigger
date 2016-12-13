@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ThreadPool.h"
+
 #include <cinttypes>
 #include <string>
 #include <map>
@@ -33,7 +35,7 @@ static inline void panic(void) {
 
 static volatile bool log_lock = false;
 
-/* #define DEBUG */
+#define DEBUG
 
 #ifdef DEBUG
 
@@ -86,7 +88,7 @@ typedef enum RequestedFileStatus {
 
 class Trigger {
 public:
-    Trigger(FileRequestCb *cb);
+    Trigger(FileRequestCb *cb, ThreadPool &thread_pool);
 
     /* Executes the given command while hooking its file accesses. */
     void Execute(const char *cmd, const struct TargetContext *); //, char *const argv[]);
@@ -99,29 +101,10 @@ public:
     bool trigger_accept(int fd, const struct sockaddr_un *addr, const struct TargetContext *);
 private:
 
-    void harvest_threads();
-    void take_thread_lock();
-    void release_thread_lock();
-
     std::map<FilePath, RequestedFileStatus> m_fileStatus;
     std::mutex m_map_mutex;
-    std::mutex m_thread_mutex;
 
     FileRequestCb *m_cb;
     uint64_t m_child_idx;
-
-    struct Thread {
-        pthread_t thread_id;
-        pthread_attr_t attr;
-        Trigger *trigger;
-        bool in_use;
-        bool running;
-    };
-
-
-    Thread *spawn(void *(*func)(void *ctx), void *ctx);
-    uint32_t m_free_threads;
-    struct Thread m_threads[2048];
-
-    struct Thread *alloc_thread();
+    ThreadPool &m_thread_pool;
 };

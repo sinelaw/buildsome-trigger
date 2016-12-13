@@ -14,6 +14,8 @@ extern "C" {
 #include <ftw.h>
 }
 
+static ThreadPool thread_pool(32);
+
 static Trigger *trigger;
 static int pipefd_to_child[2];
 static int pipefd_to_parent[2];
@@ -107,13 +109,22 @@ static void query(const char *const build_target, const struct TargetContext *ta
     LOG("For query: '%s', got:\ncmd = '%s'\ninputs = '%s'\noutputs = '%s'", build_target, target_cmd, target_inputs, target_outputs);
     query_lock = false;
     char *input_cur = target_inputs;
+    std::vector< std::future<void> > results;
     for (uint32_t i = 0; i < inputs_size; i++) {
         if (target_inputs[i] != '\n') continue;
         target_inputs[i] = '\0';
-        LOG("Wanting: %s", input_cur);
-        trigger->want(input_cur, target_ctx);
+        results.emplace_back(
+            thread_pool.enqueue([](char *input, const struct TargetContext *target_ctx){
+                    LOG("Wanting: %s", input);
+                    trigger->want(input, target_ctx);
+                }, input_cur, target_ctx)
+            );
         input_cur = &target_inputs[i + 1];
     }
+    for (auto it = results.begin(); it != results.end(); it++) {
+        it->get();
+    }
+    LOG("Done waiting for %lu inputs to be built", results.size());
     uint32_t num_outputs = 0;
     uint32_t ready_outputs = 0;
 
@@ -268,7 +279,7 @@ int main(int argc, char *const argv[])
     close(pipefd_to_child[0]);
     close(pipefd_to_parent[1]);
 
-    trigger = new Trigger(&file_request);
+    trigger = new Trigger(&file_request, thread_pool);
     trigger->want(argv[2], NULL);
     LOG("Shutdown");
 }

@@ -29,14 +29,11 @@ extern "C" {
 
 
 
-Trigger::Trigger(FileRequestCb *cb) {
+Trigger::Trigger(FileRequestCb *cb, ThreadPool &thread_pool)
+    : m_thread_pool(thread_pool)
+{
     m_cb = cb;
     m_child_idx = 0;
-    for (uint32_t i = 0; i < ARRAY_LEN(m_threads); i++) {
-        m_threads[i].in_use = false;
-        m_threads[i].running = false;
-    }
-    m_free_threads = ARRAY_LEN(m_threads);
 }
 
 // static char putenv_buffers[1024][1024];
@@ -169,104 +166,12 @@ static bool wait_for(pid_t child, const char *cmd) {
     return true;
 }
 
-struct ConnectionParams {
-    Trigger *trigger;
-    int connection_fd;
-    volatile bool started;
-    const struct TargetContext *target_ctx;
-};
-
 static __thread uint64_t connections_accepted = 0;
-static __thread uint64_t connections_completed = 0;
-
-void *thread_start(void *arg)
-{
-    struct ConnectionParams *orig_params = (struct ConnectionParams *)arg;
-    const struct ConnectionParams params = *orig_params;
-    orig_params->started = true;
-    LOG("Handling: %d",  params.connection_fd);
-    params.trigger->handle_connection(params.connection_fd, params.target_ctx);
-    close(params.connection_fd);
-    LOG("Terminating");
-    return NULL;
-}
-
-void Trigger::take_thread_lock()
-{
-    m_thread_mutex.lock();
-}
-
-void Trigger::release_thread_lock()
-{
-    m_thread_mutex.unlock();
-}
-
-void Trigger::harvest_threads()
-{
-    if (m_free_threads > 0) return;
-    this->take_thread_lock();
-    for (uint32_t i = 0; i < ARRAY_LEN(m_threads); i++) {
-        if (!m_threads[i].in_use) continue;
-        if (!m_threads[i].running) continue;
-        void *res;
-        if (0 == pthread_tryjoin_np(m_threads[i].thread_id, &res)) {
-            m_threads[i].running = false;
-            m_threads[i].in_use = false;
-            m_free_threads++;
-            ASSERT(m_free_threads < ARRAY_LEN(m_threads));
-            connections_completed++;
-            LOG("connections_accepted: %lu, connections_completed: %lu", connections_accepted, connections_completed);
-        }
-    }
-    this->release_thread_lock();
-}
-
-struct Trigger::Thread *Trigger::alloc_thread()
-{
-    while (true) {
-        this->take_thread_lock();
-        for (uint32_t i = 0; i < ARRAY_LEN(m_threads); i++) {
-            if (m_threads[i].in_use) {
-                if (!m_threads[i].running) continue; /* started but not yet running, can't use it */
-                void *res;
-                const int join_res = pthread_tryjoin_np(m_threads[i].thread_id, &res);
-                if (0 != join_res) {
-                    // ASSERT(join_res == EBUSY);
-                    continue;
-                }
-            } else {
-                ASSERT(m_free_threads > 0);
-                m_free_threads--;
-            }
-            // thread not in_use, or joined succesfully
-            Trigger::Thread *const thread = &m_threads[i];
-            thread->in_use = true;
-            thread->running = false;
-            thread->trigger = this;
-            this->release_thread_lock();
-            return thread;
-        }
-        this->release_thread_lock();
-        usleep(10);
-    }
-}
-
-Trigger::Thread *Trigger::spawn(void *(*func)(void *ctx), void *ctx)
-{
-    Thread *const thread = this->alloc_thread();
-    ASSERT(0 == pthread_attr_init(&thread->attr));
-    ASSERT(0 == pthread_create(&thread->thread_id, &thread->attr,
-                               func, ctx));
-    ASSERT(0 == pthread_attr_destroy(&thread->attr));
-    return thread;
-}
-
 
 bool Trigger::trigger_accept(int fd, const struct sockaddr_un *addr, const struct TargetContext *target_ctx)
 {
     socklen_t addrlen = sizeof(struct sockaddr_un);
     int connection_fd;
-    this->harvest_threads();
     // if (connections_accepted > 0 && (connections_completed == connections_accepted)) {
     //     LOG("All connections closed");
     //     return false;
@@ -281,19 +186,12 @@ bool Trigger::trigger_accept(int fd, const struct sockaddr_un *addr, const struc
     connections_accepted++;
     LOG("Got connection, connections_accepted: %lu", connections_accepted);
 
-    struct ConnectionParams params = {
-        .trigger = this,
-        .connection_fd = connection_fd,
-        .started = false,
-        .target_ctx = target_ctx,
-    };
-    Thread *const thread = this->spawn(&thread_start, &params);
-    LOG("Waiting for handler thread: %lX", thread->thread_id);
-    while (!params.started) {
-        usleep(10);
-    }
-    thread->running = true;
-    LOG("Done waiting for handler thread: %lX", thread->thread_id);
+    m_thread_pool.enqueue([](Trigger *trigger, int connection_fd, const struct TargetContext *target_ctx){
+            LOG("Handling: %d",  connection_fd);
+            trigger->handle_connection(connection_fd, target_ctx);
+            close(connection_fd);
+            LOG("Terminating");
+        }, this, connection_fd, target_ctx);
     return true;
 }
 

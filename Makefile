@@ -12,10 +12,10 @@ CLANGPP=clang++
 CXX=${GPP} -g ${WARNINGS} -std=c++11 -pthread  -msse4.2
 CC=${GCC} -g ${WARNINGS} -std=gnu11
 
-trigger: main.cpp trigger.o
-	${CXX} $^ -o "$@"
+trigger: main.cpp trigger.o ThreadPool.h
+	${CXX} main.cpp trigger.o -o "$@"
 
-trigger.o: trigger.cpp trigger.h
+trigger.o: trigger.cpp trigger.h ThreadPool.h
 	${CXX} -c "$<" -o "$@"
 
 fs_override.so: fshook/*.c fshook/*.h

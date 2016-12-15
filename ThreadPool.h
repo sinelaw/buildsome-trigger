@@ -76,6 +76,12 @@ auto ThreadPool::enqueue(F&& f, Args&&... args)
             std::bind(std::forward<F>(f), std::forward<Args>(args)...)
         );
 
+    if (tasks.size() > workers.size() / 2) {
+        for (size_t i = 0; i < workers.size(); i++) {
+            this->add_worker();
+        }
+    }
+
     std::future<return_type> res = task->get_future();
     {
         std::unique_lock<std::mutex> lock(queue_mutex);

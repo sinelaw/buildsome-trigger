@@ -538,7 +538,14 @@ void Trigger::Execute(const char *cmd, const struct TargetContext *target_ctx)//
         LOG("Waiting for parent...");
 
         bool yup = false;
-        ASSERT(sizeof(yup) == read(parent_child_pipe[0], &yup, sizeof(yup)));
+        char *yup_result = (char *)&yup;
+        uint32_t to_read = sizeof(yup);
+        while (to_read > 0) {
+            int read_res = read(parent_child_pipe[0], yup_result, to_read);
+            ASSERT(read_res > 0);
+            yup_result += read_res;
+            to_read -= read_res;
+        }
         ASSERT(yup);
         LOG("Starting...");
 

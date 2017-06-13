@@ -1,4 +1,5 @@
 #include "trigger.h"
+#include "pool.h"
 
 extern "C" {
 #include <arpa/inet.h>

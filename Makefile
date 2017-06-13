@@ -1,8 +1,9 @@
 .PHONY: default clean
 
-default: trigger.o fs_override.so trigger
+default: fs_override.so trigger fs_tree
+check-syntax: default
 clean:
-	rm *.o trigger fs_override.so
+	rm -f *.o *.so fs_tree trigger
 
 WARNINGS=-Wswitch-enum -Wall -Werror -Wextra
 GPP=g++ -no-pie
@@ -20,3 +21,9 @@ trigger.o: trigger.cpp trigger.h ThreadPool.h
 
 fs_override.so: fshook/*.c fshook/*.h
 	${CC} -o "$@" -Winit-self -shared -fPIC -D_GNU_SOURCE fshook/*.c -ldl
+
+fs_tree.o: fs_tree.cpp fs_tree.h typed_db.h
+	${CXX} -c "$<" -o "$@"
+
+fs_tree: fs_tree.o
+	${CXX} $^ -lbsd -lleveldb -o "$@"

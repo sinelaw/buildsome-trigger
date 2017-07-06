@@ -419,6 +419,7 @@ void Trigger::mark_ready(const char *file_path)
 void Trigger::want(const char *input_path, const struct TargetContext *target_ctx)
 {
     const struct TargetContext new_target_ctx = {
+        .fs_tree = target_ctx->fs_tree,
         .path = input_path,
         .parent = target_ctx,
     };

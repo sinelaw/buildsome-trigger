@@ -1,5 +1,6 @@
 #pragma once
 
+#include "fs_tree.h"
 #include "ThreadPool.h"
 
 #include <cinttypes>
@@ -48,6 +49,7 @@ static volatile bool log_lock = false;
 void safer_dirname(const char *path, char *dirname, uint32_t dirname_max_size);
 
 struct TargetContext {
+    FSTree *fs_tree;
     const char *path;
     const struct TargetContext *parent;
 };

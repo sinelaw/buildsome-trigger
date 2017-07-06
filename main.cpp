@@ -110,7 +110,14 @@ static void query(const char *const build_target, const struct TargetContext *ta
     LOG("For query: '%s', got:\ncmd = '%s'\ninputs = '%s'\noutputs = '%s'", build_target, target_cmd, target_inputs, target_outputs);
     query_lock = false;
 
-
+    Command cmd;
+    ASSERT(strlen(target_cmd) < sizeof(cmd.command_line));
+    strncpy(cmd.command_line, target_cmd, strlen(target_cmd));
+    const Optional<Outcome> outcome = try_get_outcome(*target_ctx->fs_tree, cmd);
+    if (outcome.has_value()) {
+        std::cout << "Found it!" << std::endl;
+        return;
+    }
 
     char *input_cur = target_inputs;
     std::vector< std::future<void> > results;

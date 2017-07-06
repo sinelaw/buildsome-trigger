@@ -154,6 +154,6 @@ public:
 
 };
 
-bool is_up_to_date(const FSTree &, const Command &);
+Optional<Outcome> try_get_outcome(const FSTree &db, const Command &cmd);
 
 #endif

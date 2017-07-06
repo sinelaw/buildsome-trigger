@@ -1,6 +1,6 @@
 .PHONY: default clean
 
-default: fs_override.so trigger fs_tree
+default: fs_override.so trigger test_fs_tree
 check-syntax: default
 clean:
 	rm -f *.o *.so fs_tree trigger
@@ -14,7 +14,7 @@ CXX=${GPP} -g ${WARNINGS} -std=c++11 -pthread  -msse4.2
 CC=${GCC} -g ${WARNINGS} -std=gnu11
 
 trigger: main.cpp trigger.o ThreadPool.h
-	${CXX} main.cpp trigger.o -o "$@"
+	${CXX} main.cpp trigger.o -o "$@" -lbsd -lleveldb
 
 trigger.o: trigger.cpp trigger.h ThreadPool.h
 	${CXX} -c "$<" -o "$@"
@@ -25,5 +25,5 @@ fs_override.so: fshook/*.c fshook/*.h
 fs_tree.o: fs_tree.cpp fs_tree.h typed_db.h
 	${CXX} -c "$<" -o "$@"
 
-fs_tree: fs_tree.o
+test_fs_tree: test_fs_tree.cpp fs_tree.o
 	${CXX} $^ -lbsd -lleveldb -o "$@"

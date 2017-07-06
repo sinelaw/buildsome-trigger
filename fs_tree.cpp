@@ -169,16 +169,3 @@ Optional<Outcome> try_get_outcome(const FSTree &db, const Command &cmd)
     return Optional<Outcome>();
 }
 
-
-int main(int argc, const char *const *argv)
-{
-    FSTree db;
-    Command cmd;
-    ASSERT(argc > 1, "Usage: " << argv[0] << " <string>");
-    strncpy(cmd.command_line, argv[1], sizeof(cmd.command_line));
-    const Optional<Outcome> outcome = try_get_outcome(db, cmd);
-    if (outcome.has_value()) {
-        std::cout << "Found it!" << std::endl;
-    }
-    return 0;
-}

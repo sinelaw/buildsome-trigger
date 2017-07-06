@@ -25,7 +25,7 @@ static void calc_hash(const T *buf, Hash *out_hash) {
     }
 }
 
-leveldb::Slice hash_to_slice(const Hash *hash)
+static inline leveldb::Slice hash_to_slice(const Hash *hash)
 {
     return leveldb::Slice(hash->hash, sizeof(hash));
 }
@@ -47,7 +47,7 @@ public:
         const char *db_name = "commands.db";
         DEBUG("Opening db: " << db_name);
         auto status = leveldb::DB::Open(options, db_name, &this->db);
-        ASSERT(status.ok(), status.ToString());
+        ASSERT(status.ok()); //, status.ToString());
     }
 
     ~TypedDB() {
@@ -61,7 +61,7 @@ public:
         leveldb::Slice slice = hash_to_slice(key.get_hash());
         auto status = this->db->Get(options, slice, &str);
         if (status.ok()) {
-            ASSERT(str.size() == sizeof(V), "invalid size");
+            ASSERT(str.size() == sizeof(V)); //, "invalid size");
             return Optional<V>(str.data(), str.size());
         }
         if (status.IsNotFound()) {

@@ -20,13 +20,6 @@ static inline void panic(void) {
     abort();
 }
 
-#define ASSERT(x)  do { if (!(x)) { PANIC("ASSERTION FAILED at %s:%d: " #x, __FILE__, __LINE__); } } while(0)
-#define PANIC(fmt, ...) do {                                            \
-        perror("FATAL ERROR: errno");                                   \
-        fprintf(stderr, "FATAL ERROR: " fmt "\n", ##__VA_ARGS__);       \
-        panic();                                                        \
-    } while (0)
-
 #define DEFINE_DATA(type, buf, buf_size, name)  \
     ASSERT(buf_size == sizeof(type));           \
     const type *name __attribute__((unused)) = (type *)buf;
@@ -35,9 +28,7 @@ static inline void panic(void) {
 
 static volatile bool log_lock = false;
 
-#define DEBUG
-
-#ifdef DEBUG
+#ifdef DEBUG_TRIGGER
 
 #define LOG(fmt, ...) do {                                              \
         bool expected_false = false;                                    \

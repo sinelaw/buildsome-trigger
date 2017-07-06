@@ -1,4 +1,5 @@
 #include "trigger.h"
+#include "assert.h"
 #include "pool.h"
 
 extern "C" {
@@ -138,7 +139,7 @@ static void debug_req(enum func func_id, bool delayed, uint32_t str_size)
     case func_execp: name = "execp"; break;
     case func_realpath: name = "realpath"; break;
     case func_trace: name ="trace"; break;
-    default: PANIC("Invalid func_id: %u", func_id);
+    default: PANIC("Invalid func_id: " << func_id);
     }
 
     LOG("recv: delayed=%s, func=%s, size=%u",
@@ -363,7 +364,7 @@ static void get_input_paths(enum func func_id, const char *buf, uint32_t buf_siz
         LOG("TRACE: %s", data->msg);
         break;
     }
-    default: PANIC("Unknown command: %d", func_id);
+    default: PANIC("Unknown command: " << func_id);
     }
 }
 
@@ -461,7 +462,7 @@ void Trigger::handle_connection(int connection_fd, const struct TargetContext *t
     uint32_t size;
     if (!recv_buf(connection_fd, buf, sizeof(buf), &size)) return;
     if (0 != strncmp(PROTOCOL_HELLO, buf, MIN(size, strlen(PROTOCOL_HELLO)))) {
-        PANIC("Exepcting HELLO message, got: %s", buf);
+        PANIC("Exepcting HELLO message, got: " << buf);
     }
     if (!send_go(connection_fd)) return;
 

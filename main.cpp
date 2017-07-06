@@ -1,4 +1,5 @@
 #include "trigger.h"
+#include "fs_tree.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -108,6 +109,9 @@ static void query(const char *const build_target, const struct TargetContext *ta
     const uint32_t outputs_size = read_multi_line(pipefd_to_parent[0], target_outputs, ARRAY_LEN(target_outputs));
     LOG("For query: '%s', got:\ncmd = '%s'\ninputs = '%s'\noutputs = '%s'", build_target, target_cmd, target_inputs, target_outputs);
     query_lock = false;
+
+
+
     char *input_cur = target_inputs;
     std::vector< std::future<void> > results;
     for (uint32_t i = 0; i < inputs_size; i++) {

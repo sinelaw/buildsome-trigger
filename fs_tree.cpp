@@ -126,8 +126,8 @@ static bool check_input(const Input &input)
     return 0 == memcmp(md5, state.hash.hash, sizeof(md5));
 }
 
-Optional<Outcome> try_get_outcome_by_input(const FSTree &db, const FSTree::NodeKey &parent_key,
-                                           const Input &input)
+static Optional<Outcome> try_get_outcome_by_input(const FSTree &db, const FSTree::NodeKey &parent_key,
+                                                  const Input &input)
 {
     if (!check_input(input)) return Optional<Outcome>();
     for (uint32_t i = 0; ; i++) {
@@ -176,20 +176,9 @@ int main(int argc, const char *const *argv)
     Command cmd;
     ASSERT(argc > 1, "Usage: " << argv[0] << " <string>");
     strncpy(cmd.command_line, argv[1], sizeof(cmd.command_line));
-    FSTree::CommandKey key(cmd);
-    const InputState state = {
-        // fill it in
-    };
-    Input input((FileName){ "input_file.txt" }, state);
-    FSTree::Node root_node(input);
-    for (uint32_t i = 0; ; i++) {
-        Optional<FSTree::Node> root = db.try_lookup_root(key, i);
-        if (!root.has_value()) break;
-        if (root.get_value() == root_node) {
-            std::cout << "Found it!" << std::endl;
-            return 0;
-        }
+    const Optional<Outcome> outcome = try_get_outcome(db, cmd);
+    if (outcome.has_value()) {
+        std::cout << "Found it!" << std::endl;
     }
-    db.add_root(key, root_node);
     return 0;
 }

@@ -1,3 +1,8 @@
 *.o
 *.so
 trigger
+Buildsome.mk.db/
+buildsome_query
+commands.db/
+test_build_rules
+test_fs_tree

@@ -1,6 +1,6 @@
 .PHONY: default clean
 
-default: fs_override.so trigger test_fs_tree build_rules.o
+default: fs_override.so trigger test_fs_tree test_build_rules
 check-syntax: default
 clean:
 	rm -f *.o *.so fs_tree trigger
@@ -30,3 +30,6 @@ build_rules.o: build_rules.cpp build_rules.h
 
 test_fs_tree: test_fs_tree.cpp fs_tree.o
 	${CXX} $^ -lbsd -lleveldb -o "$@"
+
+test_build_rules: test_build_rules.cpp build_rules.o
+	${CXX} $^  -o "$@"

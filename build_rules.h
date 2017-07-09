@@ -14,7 +14,7 @@ public:
     explicit BuildRules(std::string query_program);
     ~BuildRules();
 
-    BuildRule Query(std::string output);
+    BuildRule query(std::string output);
 
 private:
     int m_pipefd_to_child[2];

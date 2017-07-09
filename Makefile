@@ -1,6 +1,6 @@
 .PHONY: default clean
 
-default: fs_override.so trigger test_fs_tree
+default: fs_override.so trigger test_fs_tree build_rules.o
 check-syntax: default
 clean:
 	rm -f *.o *.so fs_tree trigger
@@ -23,6 +23,9 @@ fs_override.so: fshook/*.c fshook/*.h
 	${CC} -o "$@" -Winit-self -shared -fPIC -D_GNU_SOURCE fshook/*.c -ldl
 
 fs_tree.o: fs_tree.cpp fs_tree.h typed_db.h
+	${CXX} -c "$<" -o "$@"
+
+build_rules.o: build_rules.cpp build_rules.h
 	${CXX} -c "$<" -o "$@"
 
 test_fs_tree: test_fs_tree.cpp fs_tree.o

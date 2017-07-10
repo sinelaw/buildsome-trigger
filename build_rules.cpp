@@ -1,5 +1,6 @@
 #include "build_rules.h"
 #include "assert.h"
+#include "optional.h"
 
 #include <vector>
 #include <string>
@@ -95,13 +96,18 @@ static std::vector<std::string> read_multi_line(int fd)
     return result;
 }
 
-BuildRule BuildRules::query(std::string output) const
+Optional<BuildRule> BuildRules::query(std::string output) const
 {
     do_write(m_pipefd_to_child[1], output);
     BuildRule result;
     result.commands = read_multi_line(m_pipefd_to_parent[0]);
     result.inputs = read_multi_line(m_pipefd_to_parent[0]);
     result.outputs = read_multi_line(m_pipefd_to_parent[0]);
-    return result;
-
+    if ((result.outputs.size() == 0)
+        && (result.inputs.size() == 0)
+        && (result.commands.size() == 0))
+    {
+        return Optional<BuildRule>();
+    }
+    return Optional<BuildRule>(result);
 }

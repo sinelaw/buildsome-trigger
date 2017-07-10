@@ -1,5 +1,7 @@
 #pragma once
 
+#include "optional.h"
+
 #include <vector>
 #include <string>
 
@@ -14,7 +16,7 @@ public:
     explicit BuildRules(std::string query_program);
     ~BuildRules();
 
-    BuildRule query(std::string output) const;
+    Optional<BuildRule> query(std::string output) const;
 
     BuildRules(const BuildRules &) =delete;
     BuildRules& operator=(const BuildRules &) =delete;

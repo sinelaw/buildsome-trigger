@@ -1,5 +1,10 @@
 #pragma once
 
+#include "assert.h"
+
+#include <cstdint>
+#include <type_traits>
+
 template <typename T> class Optional
 {
 private:
@@ -7,7 +12,9 @@ private:
     union Payload {
         T value;
         Payload() { }
+        ~Payload() { }
     } m_payload;
+
 public:
     Optional() : m_has_value(false) {
     }
@@ -24,7 +31,7 @@ public:
     Optional(const char *src, uint32_t size)
     {
         static_assert(std::is_standard_layout<T>::value);
-        assert(size == sizeof(T));
+        ASSERT(size == sizeof(T));
         memcpy(&this->m_payload.value, src, sizeof(T));
         this->m_has_value = true;
     }

@@ -4,9 +4,10 @@
 #include <vector>
 #include <deque>
 #include <string>
+#include <map>
 
-
-void resolve_all(BuildRules &build_rules, std::deque<std::string> &resolve_queue, std::deque<BuildRule> &rule_queue)
+void resolve_all(BuildRules &build_rules, std::deque<std::string> &resolve_queue,
+                 uint32_t &rule_index, std::map<uint32_t, BuildRule> &rules)
 {
     while (resolve_queue.size() > 0) {
         auto target = resolve_queue.front();
@@ -15,7 +16,8 @@ void resolve_all(BuildRules &build_rules, std::deque<std::string> &resolve_queue
         for (auto input : rule.inputs) {
             resolve_queue.push_back(input);
         }
-        rule_queue.push_back(rule);
+        rules[rule_index] = rule;
+        rule_index++;
     }
 }
 
@@ -25,11 +27,11 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
     for (auto target : targets) {
         resolve_queue.push_back(target);
     }
-    std::deque<BuildRule> rule_queue;
-
+    std::map<uint32_t, BuildRule> rules;
+    uint32_t rule_index = 0;
     while (true) {
         // TODO: bg thread? or use async IO and a reactor?
-        resolve_all(build_rules, resolve_queue, rule_queue);
+        resolve_all(build_rules, resolve_queue, rule_index, rules);
 
     }
 }

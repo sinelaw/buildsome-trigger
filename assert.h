@@ -14,4 +14,4 @@
         }                                                               \
     } while (0)
 
-#define DEBUG(x) std::cout << x << std::endl;
+#define DEBUG(x) std::cerr << __FILE__ << ":" << __LINE__ << ": " << x << std::endl;

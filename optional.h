@@ -18,9 +18,11 @@ private:
 public:
     Optional() : m_has_value(false) {
     }
+
     Optional(T x) : m_has_value(true) {
         m_payload.value = x;
     }
+
     Optional(const Optional &other) {
         if (other.m_has_value) {
             this->m_payload.value = other.m_payload.value;
@@ -30,6 +32,7 @@ public:
 
     Optional(const char *src, uint32_t size)
     {
+        DEBUG("from src");
         static_assert(std::is_standard_layout<T>::value);
         ASSERT(size == sizeof(T));
         memcpy(&this->m_payload.value, src, sizeof(T));

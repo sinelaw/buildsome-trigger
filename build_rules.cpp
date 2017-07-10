@@ -98,16 +98,22 @@ static std::vector<std::string> read_multi_line(int fd)
 
 Optional<BuildRule> BuildRules::query(std::string output) const
 {
+    DEBUG("write");
     do_write(m_pipefd_to_child[1], output);
     BuildRule result;
+    DEBUG("read commands");
     result.commands = read_multi_line(m_pipefd_to_parent[0]);
+    DEBUG("read inputs");
     result.inputs = read_multi_line(m_pipefd_to_parent[0]);
+    DEBUG("read outputs");
     result.outputs = read_multi_line(m_pipefd_to_parent[0]);
     if ((result.outputs.size() == 0)
         && (result.inputs.size() == 0)
         && (result.commands.size() == 0))
     {
+        DEBUG("no result");
         return Optional<BuildRule>();
     }
+    DEBUG("result");
     return Optional<BuildRule>(result);
 }

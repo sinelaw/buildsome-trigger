@@ -12,12 +12,15 @@ void resolve_all(BuildRules &build_rules, std::deque<std::string> &resolve_queue
     while (resolve_queue.size() > 0) {
         auto target = resolve_queue.front();
         resolve_queue.pop_front();
-        const BuildRule rule = build_rules.query(target);
-        for (auto input : rule.inputs) {
-            resolve_queue.push_back(input);
+        const Optional<BuildRule> orule = build_rules.query(target);
+        if (orule.has_value()) {
+            const BuildRule &rule = orule.get_value();
+            for (auto input : rule.inputs) {
+                resolve_queue.push_back(input);
+            }
+            rules[rule_index] = rule;
+            rule_index++;
         }
-        rules[rule_index] = rule;
-        rule_index++;
     }
 }
 

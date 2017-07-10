@@ -14,7 +14,10 @@ public:
     explicit BuildRules(std::string query_program);
     ~BuildRules();
 
-    BuildRule query(std::string output);
+    BuildRule query(std::string output) const;
+
+    BuildRules(const BuildRules &) =delete;
+    BuildRules& operator=(const BuildRules &) =delete;
 
 private:
     int m_pipefd_to_child[2];

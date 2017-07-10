@@ -95,7 +95,7 @@ static std::vector<std::string> read_multi_line(int fd)
     return result;
 }
 
-BuildRule BuildRules::query(std::string output)
+BuildRule BuildRules::query(std::string output) const
 {
     do_write(m_pipefd_to_child[1], output);
     BuildRule result;

@@ -41,7 +41,7 @@ public:
     }
 
     const T &get_value() const {
-        assert(this->m_has_value);
+        ASSERT(this->m_has_value);
         return this->m_payload.value;
     }
 };

@@ -9,23 +9,23 @@ template <typename T> class Optional
 {
 private:
     bool m_has_value;
-    union Payload {
-        T value;
-        Payload() { }
-        ~Payload() { }
-    } m_payload;
+    T *value;
 
 public:
-    Optional() : m_has_value(false) {
+    ~Optional() {
+        if (m_has_value) delete value;
     }
 
-    Optional(T x) : m_has_value(true) {
-        m_payload.value = x;
+    Optional() : m_has_value(false), value(nullptr) {
+    }
+
+    Optional(const T &x) : m_has_value(true) {
+        value = new T(x);
     }
 
     Optional(const Optional &other) {
         if (other.m_has_value) {
-            this->m_payload.value = other.m_payload.value;
+            this->value = new T(*other.value);
         }
         this->m_has_value = other.m_has_value;
     }
@@ -35,7 +35,9 @@ public:
         DEBUG("from src");
         static_assert(std::is_standard_layout<T>::value);
         ASSERT(size == sizeof(T));
-        memcpy(&this->m_payload.value, src, sizeof(T));
+        char temp[sizeof(T)];
+        memcpy(temp, src, sizeof(T));
+        this->value = new T(*((T*)temp));
         this->m_has_value = true;
     }
 
@@ -45,6 +47,6 @@ public:
 
     const T &get_value() const {
         ASSERT(this->m_has_value);
-        return this->m_payload.value;
+        return *this->value;
     }
 };

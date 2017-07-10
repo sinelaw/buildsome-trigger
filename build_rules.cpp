@@ -91,7 +91,8 @@ static std::vector<std::string> read_multi_line(int fd)
     // LOG("Reading %u lines", lines_count);
     for (uint32_t i = 0; i < lines_count; i++) {
         const uint32_t line_size __attribute__((unused)) = read_line(fd, line, line_max_size);
-        result.push_back(std::string(line));
+        ASSERT(line_size < sizeof(line) - 1);
+        result.push_back(std::string(line, line_size));
     }
     return result;
 }

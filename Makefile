@@ -16,7 +16,7 @@ CC=${GCC} -g ${WARNINGS} -std=gnu11
 out:
 	mkdir "$@"
 
-out/%.o: %.cpp out *.h
+out/%.o: %.cpp *.h
 	${CXX} -c "$<" -o "$@"
 
 out/fs_override.so: fshook/*.c fshook/*.h out

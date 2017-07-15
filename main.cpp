@@ -49,8 +49,10 @@ void resolve_all(BuildRules &build_rules,
 
             continue;
         }
+        DEBUG("Resolving: " << req.target);
         const Optional<BuildRule> orule = build_rules.query(req.target);
         rules_cache[req.target] = orule;
+        DEBUG("Done Resolving: " << req.target);
         if (orule.has_value()) {
             const BuildRule &rule = orule.get_value();
             for (auto input : rule.inputs) {
@@ -119,6 +121,7 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
 
     RunnerState runner_state;
     for (auto target : targets) {
+        DEBUG("Enqueing: " << target);
         runner_state.resolve_queue.push_back(ResolveRequest(target));
     }
     std::map<std::string, Optional<BuildRule>> rules_cache;
@@ -156,6 +159,8 @@ int main(int argc, char **argv)
         std::cerr << "Usage: " << argv[0] << " <query program> <target>" << std::endl;
         return 1;
     }
+
+    DEBUG("Main: " << argc);
 
     BuildRules build_rules(argv[1]);
 

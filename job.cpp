@@ -411,7 +411,7 @@ void Job::want(std::string input)
     mtx.lock();
 }
 
-void Job::execute()
+void Job::th_execute()
 {
     uint32_t child_idx = 0;
 
@@ -485,28 +485,33 @@ void Job::execute()
 
     // LOG("Sent yup");
 
-    std::vector<std::thread> threads;
+    std::vector<std::thread *> threads;
     while (!wait_for(child, cmd)) {
         const Optional<int> o_conn_fd = trigger_accept(sock_fd, &addr);
         if (o_conn_fd.has_value()) {
             int connection_fd = o_conn_fd.get_value();
-            std::thread accept_thread([&](){
+            std::thread *accept_thread = new std::thread([&](){
                     LOG("Handling: %d",  connection_fd);
                     handle_connection(*this, connection_fd);
                     close(connection_fd);
                     LOG("Terminating");
                 });
-            threads.push_back(accept_thread);
+            threads.emplace_back(accept_thread);
         }
         usleep(10);
     }
 
-    for (auto &th : threads) {
-        th.join();
+    for (auto th : threads) {
+        th->join();
+        delete th;
     }
     // LOG("Done accepting, waiting for child: %d", child);
     // LOG("Child %d terminated", child);
     close(sock_fd);
 
     // std::cerr << "Build: '" << target_ctx->path << "' - Done" << std::endl;
+}
+
+void Job::wait() {
+    m_exec_thread.join();
 }

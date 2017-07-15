@@ -47,7 +47,8 @@ void resolve_all(BuildRules &build_rules, std::deque<ResolveRequest> &resolve_qu
 
 struct RunnerState {
     std::deque<ResolveRequest> resolve_queue;
-    std::set<BuildRule> active_jobs;
+    std::map<BuildRule, Job*> active_jobs;
+    std::vector<Job *> done_jobs;
     std::map<BuildRule, Outcome> outcomes;
 };
 
@@ -59,6 +60,8 @@ static void run_job(const BuildRule &rule,
     // 3. at most one resolution of a command's input is run in parallel,
     //    any more are put on the queue
     std::mutex child_job_mtx;
+
+    std::cerr << "Running: " << rule.to_string() << std::endl;
 
     auto resolve_cb = [&](std::string input, std::function<void(void)> done) {
         const std::function<void(const Optional<BuildRule> &)> done_handler =
@@ -76,15 +79,18 @@ static void run_job(const BuildRule &rule,
         runner_state.resolve_queue.push_back(ResolveRequest(input, &done_handler));
     };
 
-    auto completion_cb = [&](Outcome o) {
+    auto completion_cb = [&](void) {
+        std::cerr << "Done: " << rule.to_string() << std::endl;
+        auto found_job = runner_state.active_jobs.find(rule);
+        ASSERT(found_job != runner_state.active_jobs.end());
+        runner_state.done_jobs.push_back(found_job->second);
         auto erased_count = runner_state.active_jobs.erase(rule);
         ASSERT(1 == erased_count);
-        runner_state.outcomes[rule] = o;
+//        runner_state.outcomes[rule] = o;
     };
 
-    runner_state.active_jobs.insert(rule);
-    Job job(rule, resolve_cb, completion_cb);
-    job.execute();
+    Job *const job = new Job(rule, resolve_cb, completion_cb);
+    runner_state.active_jobs[rule] = job;
 }
 
 void build(BuildRules &build_rules, const std::vector<std::string> &targets)

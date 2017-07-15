@@ -13,6 +13,10 @@ struct BuildRule {
     bool operator<(const BuildRule &other) const {
         return (outputs < other.outputs);
     }
+
+    std::string to_string() const {
+        return outputs.front();
+    }
 };
 
 class BuildRules {

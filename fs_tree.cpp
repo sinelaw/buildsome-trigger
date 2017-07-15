@@ -18,13 +18,13 @@ FSTree::CommandKey::CommandKey(const Command &x) {
 
 FSTree::NodeKey::NodeKey(const CommandKey &parent, uint32_t idx) {
     this->m_hash = *parent.get_hash();
-    static_assert(sizeof(this->m_hash) >= sizeof(idx));
+    static_assert(sizeof(this->m_hash) >= sizeof(idx), "hash type too small");
     *(decltype(idx)*)&this->m_hash += idx;
 }
 
 FSTree::NodeKey::NodeKey(const FSTree::NodeKey &parent, uint32_t idx) {
     this->m_hash = *parent.get_hash();
-    static_assert(sizeof(this->m_hash) >= sizeof(idx));
+    static_assert(sizeof(this->m_hash) >= sizeof(idx), "hash type too small");
     *(decltype(idx)*)&this->m_hash += idx;
 }
 
@@ -38,8 +38,8 @@ FSTree::Node::Node(const FSTree::Node &other) {
 }
 
 bool FSTree::Node::operator==(const FSTree::Node &other) const {
-    static_assert(std::is_standard_layout<Input>::value);
-    static_assert(std::is_standard_layout<Outcome>::value);
+    static_assert(std::is_standard_layout<Input>::value, "Input must have standard_layout");
+    static_assert(std::is_standard_layout<Outcome>::value, "Outcome must have standard_layout");
     if (this->type != other.type) return false;
     switch (this->type) {
     case FSTree::NodeType::NodeTypeInput: return (!memcmp(&this->input, &other.input, sizeof(other.input)));
@@ -122,7 +122,7 @@ static bool check_input(const Input &input)
     char md5[MD5_DIGEST_STRING_LENGTH];
     const char *const md5_res = MD5File(input.name.file_name, md5);
     assert(md5_res);
-    static_assert(sizeof(md5) <= sizeof(state.hash.hash));
+    static_assert(sizeof(md5) <= sizeof(state.hash.hash), "Hash type too small");
     return 0 == memcmp(md5, state.hash.hash, sizeof(md5));
 }
 

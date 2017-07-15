@@ -33,7 +33,7 @@ public:
     Optional(const char *src, uint32_t size)
     {
         DEBUG("from src");
-        static_assert(std::is_standard_layout<T>::value);
+        static_assert(std::is_standard_layout<T>::value, "Value must have standard_layout");
         ASSERT(size == sizeof(T));
         char temp[sizeof(T)];
         memcpy(temp, src, sizeof(T));

@@ -487,7 +487,7 @@ void Job::execute()
 
     std::vector<std::thread> threads;
     while (!wait_for(child, cmd)) {
-        Optional<int> o_conn_fd = trigger_accept(sock_fd, &addr);
+        const Optional<int> o_conn_fd = trigger_accept(sock_fd, &addr);
         if (o_conn_fd.has_value()) {
             int connection_fd = o_conn_fd.get_value();
             std::thread accept_thread([&](){

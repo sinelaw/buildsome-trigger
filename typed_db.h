@@ -17,7 +17,7 @@ struct Hash {
 
 template <typename T>
 static void calc_hash(const T *buf, Hash *out_hash) {
-    static_assert(std::is_pod<T>::value);
+    static_assert(std::is_pod<T>::value, "Value must be is_pod");
     // TODO
     bzero(out_hash->hash, sizeof(out_hash->hash));
     for (uint32_t i = 0; i < sizeof(T); i++) {

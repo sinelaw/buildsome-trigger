@@ -7,17 +7,17 @@
 #include <deque>
 #include <string>
 #include <map>
-#include <map>
+#include <set>
 #include <mutex>
 
 class ResolveRequest {
 public:
     const std::string target;
-    std::function<void(const Optional<BuildRule> &)> *const cb;
+    const std::function<void(const Optional<BuildRule> &)> *const cb;
 
     explicit ResolveRequest(std::string t)
         : target(t), cb(nullptr) { }
-    ResolveRequest(std::string t, std::function<void(const Optional<BuildRule> &)> *f)
+    ResolveRequest(std::string t, const std::function<void(const Optional<BuildRule> &)> *f)
         : target(t), cb(f) { }
 };
 
@@ -47,7 +47,7 @@ void resolve_all(BuildRules &build_rules, std::deque<ResolveRequest> &resolve_qu
 
 struct RunnerState {
     std::deque<ResolveRequest> resolve_queue;
-    std::map<BuildRule, Job> active_jobs;
+    std::set<BuildRule> active_jobs;
     std::map<BuildRule, Outcome> outcomes;
 };
 
@@ -61,7 +61,7 @@ static void run_job(const BuildRule &rule,
     std::mutex child_job_mtx;
 
     auto resolve_cb = [&](std::string input, std::function<void(void)> done) {
-        std::function<void(const Optional<BuildRule> &)> done_handler =
+        const std::function<void(const Optional<BuildRule> &)> done_handler =
         [&](const Optional<BuildRule> &res_rule)
         {
             if (res_rule.has_value()
@@ -83,7 +83,7 @@ static void run_job(const BuildRule &rule,
     };
 
     Job job(rule);
-    runner_state.active_jobs[rule] = job;
+    runner_state.active_jobs.insert(rule);
     job.execute(resolve_cb, completion_cb);
 }
 

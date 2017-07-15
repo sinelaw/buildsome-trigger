@@ -67,7 +67,7 @@ public:
         if (status.IsNotFound()) {
             return Optional<V>();
         }
-        PANIC("get error:" << status.ToString());
+        PANIC("got error:"); // << status.ToString());
     }
 
     template <typename V> void Put(const Key<V> &key, const V *value) {

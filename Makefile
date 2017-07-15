@@ -29,4 +29,4 @@ out/test_build_rules: test_build_rules.cpp out/build_rules.o
 	${CXX} $^  -o "$@"
 
 out/main: out/main.o out/build_rules.o out/job.o
-	${CXX} $^ -lbsd -lleveldb -o "$@"
+	${CXX} $^ -lbsd -lleveldb -lstdc++ -o "$@"

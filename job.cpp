@@ -36,6 +36,7 @@ struct OperationPaths {
 
 #define LOG(...)
 
+#define SHELL_EXE_PATH "/usr/bin/bash"
 #define PROTOCOL_HELLO "PROTOCOL10: HELLO, I AM: "
 #define LD_PRELOAD_PATH "./fs_override.so"
 
@@ -169,7 +170,7 @@ static void debug_req(enum func func_id, bool delayed, uint32_t str_size)
     (void)str_size;
 }
 
-static bool wait_for(pid_t child, const char *cmd) {
+static bool wait_for(pid_t child, const std::string &cmd) {
     int wait_res;
     int wait_child = waitpid(child, &wait_res, WNOHANG);
     if ((wait_child < 0) && (errno == EINTR)) {
@@ -181,8 +182,8 @@ static bool wait_for(pid_t child, const char *cmd) {
     }
     ASSERT(wait_child == child);
     if (WEXITSTATUS(wait_res) != 0) {
-        fprintf(stderr, "BUILD FAILED: Child process %d exited with status: %d\n", child, WEXITSTATUS(wait_res));
-        fprintf(stderr, "BUILD FAILED: Failing command: %s\n", cmd);
+        std::cerr << "BUILD FAILED: Child process %d exited with status: %d\n" << child << WEXITSTATUS(wait_res) << std::endl;
+        std::cerr << "BUILD FAILED: Failing command: %s\n" << cmd << std::endl;
         exit(1);
     }
     return true;
@@ -377,7 +378,7 @@ static void handle_connection(Job &job, int connection_fd)
     }
 }
 
-static std::thread trigger_accept(Job &job, int fd, const struct sockaddr_un *addr)
+static Optional<int> trigger_accept(int fd, const struct sockaddr_un *addr)
 {
     socklen_t addrlen = sizeof(struct sockaddr_un);
     int connection_fd;
@@ -388,20 +389,14 @@ static std::thread trigger_accept(Job &job, int fd, const struct sockaddr_un *ad
     connection_fd = accept(fd, (struct sockaddr *)addr, &addrlen);
     if (connection_fd < 0) {
         ASSERT(errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR);
-        return false;
+        return Optional<int>();
     }
     ASSERT(connection_fd >= 0);
     // HANDLE CONNECTION
     connections_accepted++;
     LOG("Got connection, connections_accepted: %lu", connections_accepted);
 
-    std::thread accept_thread([&](){
-            LOG("Handling: %d",  connection_fd);
-            handle_connection(job, connection_fd);
-            close(connection_fd);
-            LOG("Terminating");
-        });
-    return accept_thread;
+    return Optional<int>(connection_fd);
 }
 
 void Job::want(std::string input)
@@ -420,6 +415,11 @@ void Job::execute()
 {
     uint32_t child_idx = 0;
 
+    std::string cmd;
+    for (auto line : m_rule.commands) {
+        cmd += "\n" + line;
+    }
+    
     std::ostringstream stringStream;
     stringStream << "/tmp/trigger.sock." << getpid() << "." << child_idx;
     const std::string sockAddr = stringStream.str();
@@ -469,7 +469,7 @@ void Job::execute()
         // LOG("Starting...");
 
         close(parent_child_pipe[0]);
-        const char *const args[] = { SHELL_EXE_PATH, "-ec", cmd, NULL };
+        const char *const args[] = { SHELL_EXE_PATH, "-ec", cmd.c_str(), NULL };
         execvpe("/bin/sh", (char *const*)args, (char *const*)envir);
         PANIC("exec failed?!");
     }
@@ -485,9 +485,24 @@ void Job::execute()
 
     // LOG("Sent yup");
 
+    std::vector<std::thread> threads;
     while (!wait_for(child, cmd)) {
-        trigger_accept(sock_fd, &addr, target_ctx);
+        Optional<int> o_conn_fd = trigger_accept(sock_fd, &addr);
+        if (o_conn_fd.has_value()) {
+            int connection_fd = o_conn_fd.get_value();
+            std::thread accept_thread([&](){
+                    LOG("Handling: %d",  connection_fd);
+                    handle_connection(*this, connection_fd);
+                    close(connection_fd);
+                    LOG("Terminating");
+                });
+            threads.push_back(accept_thread);
+        }
         usleep(10);
+    }
+
+    for (auto &th : threads) {
+        th.join();
     }
     // LOG("Done accepting, waiting for child: %d", child);
     // LOG("Child %d terminated", child);

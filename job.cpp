@@ -419,7 +419,7 @@ void Job::th_execute()
     for (auto line : m_rule.commands) {
         cmd += "\n" + line;
     }
-    
+
     std::ostringstream stringStream;
     stringStream << "/tmp/trigger.sock." << getpid() << "." << child_idx;
     const std::string sockAddr = stringStream.str();

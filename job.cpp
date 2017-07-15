@@ -34,7 +34,7 @@ struct OperationPaths {
     uint32_t output_count;
 };
 
-#define LOG(...)
+#define LOG(x) std::cerr << x << std::endl
 
 #define SHELL_EXE_PATH "/usr/bin/bash"
 #define PROTOCOL_HELLO "PROTOCOL10: HELLO, I AM: "
@@ -84,7 +84,7 @@ static int trigger_listen(const char *addr, struct sockaddr_un *out_addr) {
     ASSERT(strlen(addr) < sizeof(out_addr->sun_path));
     strcpy(out_addr->sun_path, addr);
 
-    LOG("Binding to: %s", out_addr->sun_path);
+    LOG("Binding to: " << out_addr->sun_path);
     ASSERT(0 == bind(fd,
                      (struct sockaddr *) out_addr,
                      sizeof(struct sockaddr_un)));
@@ -105,7 +105,7 @@ static bool checked_recv(int sockfd, void *buf, size_t len)
         int received = recv(sockfd, pos, len - received_amount, 0);
         if (received < 0) {
             perror("recv");
-            LOG("recv returned: %d, errno: %d", received, errno);
+            LOG("recv returned: " << received << " errno: " << errno);
             return false;
         }
         if (received == 0) {
@@ -117,7 +117,7 @@ static bool checked_recv(int sockfd, void *buf, size_t len)
         if (received_amount == len) {
             return true;
         }
-        LOG("need moar bytes, have %u/%lu", received_amount, len);
+        LOG("need moar bytes, have " << received_amount << "/" << len);
     }
 }
 
@@ -129,7 +129,7 @@ static bool recv_buf(int connection_fd, char *buf, uint32_t buf_size, std::size_
     *out_received = size;
     if (size == 0) return true;
 
-    // LOG("recv size: " ,  size);
+    // LOG("recv size: " << size);
     ASSERT(buf_size > size);
     return checked_recv(connection_fd, buf, size);
 }
@@ -163,8 +163,9 @@ static void debug_req(enum func func_id, bool delayed, uint32_t str_size)
     default: PANIC("Invalid func_id: " << func_id);
     }
 
-    LOG("recv: delayed=%s, func=%s, size=%u",
-        (delayed ? "yes" : "no"),  name, str_size);
+    LOG("recv: delayed=" << (delayed ? "yes" : "no")
+        << "name: " << name
+        << "size: " << str_size);
     (void)name;
     (void)delayed;
     (void)str_size;
@@ -194,7 +195,7 @@ static __thread uint64_t connections_accepted = 0;
 static void get_input_paths(enum func func_id, const char *buf, uint32_t buf_size,
                             struct OperationPaths *out_paths)
 {
-    LOG("func_id: %X", func_id);
+    LOG("func_id: " << func_id);
     out_paths->input_count = 0;
     out_paths->output_count = 0;
     switch (func_id) {
@@ -329,7 +330,7 @@ static void get_input_paths(enum func func_id, const char *buf, uint32_t buf_siz
     }
     case func_trace: {
         DEFINE_DATA(struct func_trace, buf, buf_size, data);
-        LOG("TRACE: %s", data->msg);
+        LOG("TRACE: " << data->msg);
         break;
     }
     default: PANIC("Unknown command: " << func_id);
@@ -366,7 +367,7 @@ static void handle_connection(Job &job, int connection_fd)
 
         for (uint32_t i = 0; i < paths.output_count; i++) {
             char output_path[0x1000];
-            LOG("OUTPUT: %s", paths.output_paths[i]);
+            LOG("OUTPUT: " << paths.output_paths[i]);
             safer_dirname(paths.output_paths[i], output_path, sizeof(output_path));
             struct stat output_dir_stat;
             if (0 != stat(output_path, &output_dir_stat)) {
@@ -394,7 +395,7 @@ static Optional<int> trigger_accept(int fd, const struct sockaddr_un *addr)
     ASSERT(connection_fd >= 0);
     // HANDLE CONNECTION
     connections_accepted++;
-    LOG("Got connection, connections_accepted: %lu", connections_accepted);
+    LOG("Got connection, connections_accepted: " << connections_accepted);
 
     return Optional<int>(connection_fd);
 }
@@ -424,7 +425,7 @@ void Job::th_execute()
     stringStream << "/tmp/trigger.sock." << getpid() << "." << child_idx;
     const std::string sockAddr = stringStream.str();
 
-    // LOG("Forking child: %s", cmd);
+    LOG("Forking child: " << cmd);
     // std::cerr << "Build: '" << target_ctx->path << "'" << std::endl;
 
     int parent_child_pipe[2];
@@ -491,7 +492,7 @@ void Job::th_execute()
         if (o_conn_fd.has_value()) {
             int connection_fd = o_conn_fd.get_value();
             std::thread *accept_thread = new std::thread([&](){
-                    LOG("Handling: %d",  connection_fd);
+                    LOG("Handling: " << connection_fd);
                     handle_connection(*this, connection_fd);
                     close(connection_fd);
                     LOG("Terminating");

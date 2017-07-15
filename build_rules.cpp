@@ -78,7 +78,7 @@ static uint32_t read_line(int fd, char *output, uint32_t output_max_size)
 
 static std::vector<std::string> read_multi_line(int fd)
 {
-    char line[2048];
+    char line[8192];
     constexpr const uint32_t line_max_size = sizeof(line);
     const uint32_t read_size = read_line(fd, line, line_max_size);
     ASSERT(read_size > 0);

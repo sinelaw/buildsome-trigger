@@ -34,7 +34,7 @@ struct OperationPaths {
     uint32_t output_count;
 };
 
-#define LOG(x) std::cerr << x << std::endl
+#define LOG(x) DEBUG(x)
 
 #define SHELL_EXE_PATH "/usr/bin/bash"
 #define PROTOCOL_HELLO "PROTOCOL10: HELLO, I AM: "
@@ -164,8 +164,8 @@ static void debug_req(enum func func_id, bool delayed, uint32_t str_size)
     }
 
     LOG("recv: delayed=" << (delayed ? "yes" : "no")
-        << "name: " << name
-        << "size: " << str_size);
+        << " name: " << name
+        << " size: " << str_size);
     (void)name;
     (void)delayed;
     (void)str_size;
@@ -412,9 +412,12 @@ void Job::want(std::string input)
     mtx.lock();
 }
 
+uint32_t global_child_idx = 0;
+
 void Job::th_execute()
 {
-    uint32_t child_idx = 0;
+    const uint32_t child_idx = global_child_idx;
+    global_child_idx++;
 
     std::string cmd;
     for (auto line : m_rule.commands) {

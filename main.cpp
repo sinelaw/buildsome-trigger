@@ -9,10 +9,13 @@
 void resolve_all(BuildRules &build_rules, std::deque<std::string> &resolve_queue,
                  uint32_t &rule_index, std::map<uint32_t, BuildRule> &rules)
 {
+    std::map<std::string, Optional<BuildRule>> known_rules;
     while (resolve_queue.size() > 0) {
         auto target = resolve_queue.front();
         resolve_queue.pop_front();
+        if (known_rules.find(target) == known_rules.end()) continue;
         const Optional<BuildRule> orule = build_rules.query(target);
+        known_rules[target] = orule;
         if (orule.has_value()) {
             const BuildRule &rule = orule.get_value();
             for (auto input : rule.inputs) {

@@ -10,8 +10,9 @@ GPP=g++ -no-pie
 GCC=gcc -no-pie
 CLANGPP=clang++
 
-CXX=${CLANGPP} -g ${WARNINGS} -std=c++11 -pthread  -msse4.2
+CXX=${GPP} -g ${WARNINGS} -std=c++11 -pthread  -msse4.2
 CC=${GCC} -g ${WARNINGS} -std=gnu11
+
 
 out:
 	mkdir "$@"
@@ -29,4 +30,4 @@ out/test_build_rules: test_build_rules.cpp out/build_rules.o
 	${CXX} $^  -o "$@"
 
 out/main: out/main.o out/build_rules.o out/job.o
-	${CXX} $^ -lbsd -lleveldb -lstdc++ -o "$@"
+	${CXX} $^ -lbsd -lleveldb  -o "$@"

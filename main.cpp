@@ -21,30 +21,6 @@ public:
         : target(t), cb(f) { }
 };
 
-void resolve_all(BuildRules &build_rules, std::deque<ResolveRequest> &resolve_queue,
-                 std::map<std::string, Optional<BuildRule>> &rules_cache,
-                 std::deque<BuildRule> &rules)
-{
-    while (resolve_queue.size() > 0) {
-        auto req = resolve_queue.front();
-        resolve_queue.pop_front();
-        auto cached = rules_cache.find(req.target);
-        if (cached != rules_cache.end()) {
-            if (req.cb) (*req.cb)(cached->second);
-            continue;
-        }
-        const Optional<BuildRule> orule = build_rules.query(req.target);
-        rules_cache[req.target] = orule;
-        if (orule.has_value()) {
-            const BuildRule &rule = orule.get_value();
-            for (auto input : rule.inputs) {
-                resolve_queue.push_back(ResolveRequest(input));
-            }
-            rules.push_back(rule);
-        }
-    }
-}
-
 struct RunnerState {
     std::deque<ResolveRequest> resolve_queue;
     std::map<BuildRule, Job*> active_jobs;
@@ -53,30 +29,66 @@ struct RunnerState {
     std::mutex mtx;
 };
 
+void resolve_all(BuildRules &build_rules,
+                 RunnerState &runner_state,
+                 std::map<std::string, Optional<BuildRule>> &rules_cache,
+                 std::deque<BuildRule> &rules)
+{
+    std::unique_lock<std::mutex> lck (runner_state.mtx);
+
+    while (runner_state.resolve_queue.size() > 0) {
+        auto req = runner_state.resolve_queue.front();
+        runner_state.resolve_queue.pop_front();
+        auto cached = rules_cache.find(req.target);
+        if (cached != rules_cache.end()) {
+            auto found_rule = cached->second;
+            lck.unlock();
+            DEBUG("Invoking callback on: " << (found_rule.has_value() ? found_rule.get_value().to_string() : "<none>"));
+            if (req.cb) (*req.cb)(found_rule);
+            lck.lock();
+
+            continue;
+        }
+        const Optional<BuildRule> orule = build_rules.query(req.target);
+        rules_cache[req.target] = orule;
+        if (orule.has_value()) {
+            const BuildRule &rule = orule.get_value();
+            for (auto input : rule.inputs) {
+                runner_state.resolve_queue.push_back(ResolveRequest(input));
+            }
+            rules.push_back(rule);
+
+            auto found_rule = cached->second;
+            lck.unlock();
+            DEBUG("Invoking callback on: " << (found_rule.has_value() ? found_rule.get_value().to_string() : "<none>"));
+            if (req.cb) (*req.cb)(found_rule);
+            lck.lock();
+        }
+    }
+}
+
 static void run_job(const BuildRule &rule,
                     RunnerState &runner_state)
 {
-    std::unique_lock<std::mutex> lck (runner_state.mtx);
 
     // 1. execute command
     // 2. all forks/execs done by this command are allowed in parallel
     // 3. at most one resolution of a command's input is run in parallel,
     //    any more are put on the queue
-    std::mutex child_job_mtx;
-
     std::cerr << "Running: " << rule.to_string() << std::endl;
 
     auto resolve_cb = [&](std::string input, std::function<void(void)> done) {
+        DEBUG("resolve cb: " << input);
         const std::function<void(const Optional<BuildRule> &)> done_handler =
         [&](const Optional<BuildRule> &res_rule)
         {
+            DEBUG("done resolve cb: " << input);
             std::unique_lock<std::mutex> lck (runner_state.mtx);
-            if (res_rule.has_value()
-                && (runner_state.outcomes.find(res_rule.get_value()) == runner_state.outcomes.end()))
-            {
-                child_job_mtx.lock();
+            const bool not_build_yet = (res_rule.has_value()
+                                        && (runner_state.outcomes.find(res_rule.get_value()) == runner_state.outcomes.end()));
+            lck.unlock();
+            if (not_build_yet) {
                 run_job(res_rule.get_value(), runner_state);
-                child_job_mtx.unlock();
             }
             done();
         };
@@ -85,8 +97,8 @@ static void run_job(const BuildRule &rule,
     };
 
     auto completion_cb = [&](void) {
-        std::unique_lock<std::mutex> lck (runner_state.mtx);
         std::cerr << "Done: " << rule.to_string() << std::endl;
+        std::unique_lock<std::mutex> lck (runner_state.mtx);
         auto found_job = runner_state.active_jobs.find(rule);
         ASSERT(found_job != runner_state.active_jobs.end());
         runner_state.done_jobs.push_back(found_job->second);
@@ -96,6 +108,8 @@ static void run_job(const BuildRule &rule,
     };
 
     Job *const job = new Job(rule, resolve_cb, completion_cb);
+
+    std::unique_lock<std::mutex> lck (runner_state.mtx);
     runner_state.active_jobs[rule] = job;
 }
 
@@ -114,13 +128,8 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
            || (runner_state.done_jobs.size() > 0)
            || (runner_state.active_jobs.size() > 0))
     {
-        {
-            std::unique_lock<std::mutex> lck (runner_state.mtx);
-
-            // TODO: bg thread? or use async IO and a reactor?
-            resolve_all(build_rules, runner_state.resolve_queue, rules_cache, job_queue);
-
-        }
+        // TODO: bg thread? or use async IO and a reactor?
+        resolve_all(build_rules, runner_state, rules_cache, job_queue);
 
         while ((job_queue.size() > 0)
                && (runner_state.active_jobs.size() < max_concurrent_jobs))

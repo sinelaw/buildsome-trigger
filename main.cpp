@@ -1,44 +1,113 @@
 #include "assert.h"
 #include "build_rules.h"
+#include "job.h"
 
+#include <cinttypes>
 #include <vector>
 #include <deque>
 #include <string>
 #include <map>
+#include <map>
+#include <mutex>
 
-void resolve_all(BuildRules &build_rules, std::deque<std::string> &resolve_queue,
-                 uint32_t &rule_index, std::map<uint32_t, BuildRule> &rules)
+class ResolveRequest {
+public:
+    const std::string target;
+    std::function<void(const Optional<BuildRule> &)> *const cb;
+
+    explicit ResolveRequest(std::string t)
+        : target(t), cb(nullptr) { }
+    ResolveRequest(std::string t, std::function<void(const Optional<BuildRule> &)> *f)
+        : target(t), cb(f) { }
+};
+
+void resolve_all(BuildRules &build_rules, std::deque<ResolveRequest> &resolve_queue,
+                 std::map<std::string, Optional<BuildRule>> &rules_cache,
+                 std::deque<BuildRule> &rules)
 {
-    std::map<std::string, Optional<BuildRule>> known_rules;
     while (resolve_queue.size() > 0) {
-        auto target = resolve_queue.front();
+        auto req = resolve_queue.front();
         resolve_queue.pop_front();
-        if (known_rules.find(target) == known_rules.end()) continue;
-        const Optional<BuildRule> orule = build_rules.query(target);
-        known_rules[target] = orule;
+        auto cached = rules_cache.find(req.target);
+        if (cached != rules_cache.end()) {
+            if (req.cb) (*req.cb)(cached->second);
+            continue;
+        }
+        const Optional<BuildRule> orule = build_rules.query(req.target);
+        rules_cache[req.target] = orule;
         if (orule.has_value()) {
             const BuildRule &rule = orule.get_value();
             for (auto input : rule.inputs) {
-                resolve_queue.push_back(input);
+                resolve_queue.push_back(ResolveRequest(input));
             }
-            rules[rule_index] = rule;
-            rule_index++;
+            rules.push_back(rule);
         }
     }
 }
 
+struct RunnerState {
+    std::deque<ResolveRequest> resolve_queue;
+    std::map<BuildRule, Job> active_jobs;
+    std::map<BuildRule, Outcome> outcomes;
+};
+
+static void run_job(const BuildRule &rule,
+                    RunnerState &runner_state)
+{
+    // 1. execute command
+    // 2. all forks/execs done by this command are allowed in parallel
+    // 3. at most one resolution of a command's input is run in parallel,
+    //    any more are put on the queue
+    std::mutex child_job_mtx;
+
+    auto resolve_cb = [&](std::string input, std::function<void(void)> done) {
+        std::function<void(const Optional<BuildRule> &)> done_handler =
+        [&](const Optional<BuildRule> &res_rule)
+        {
+            if (res_rule.has_value()
+                && (runner_state.outcomes.find(res_rule.get_value()) == runner_state.outcomes.end()))
+            {
+                child_job_mtx.lock();
+                run_job(res_rule.get_value(), runner_state);
+                child_job_mtx.unlock();
+            }
+            done();
+        };
+        runner_state.resolve_queue.push_back(ResolveRequest(input, &done_handler));
+    };
+
+    auto completion_cb = [&](Outcome o) {
+        auto erased_count = runner_state.active_jobs.erase(rule);
+        ASSERT(1 == erased_count);
+        runner_state.outcomes[rule] = o;
+    };
+
+    Job job(rule);
+    runner_state.active_jobs[rule] = job;
+    job.execute(resolve_cb, completion_cb);
+}
+
 void build(BuildRules &build_rules, const std::vector<std::string> &targets)
 {
-    std::deque<std::string> resolve_queue;
+    constexpr const uint32_t max_concurrent_jobs = 4;
+
+    RunnerState runner_state;
     for (auto target : targets) {
-        resolve_queue.push_back(target);
+        runner_state.resolve_queue.push_back(ResolveRequest(target));
     }
-    std::map<uint32_t, BuildRule> rules;
-    uint32_t rule_index = 0;
+    std::map<std::string, Optional<BuildRule>> rules_cache;
+    std::deque<BuildRule> job_queue;
     while (true) {
         // TODO: bg thread? or use async IO and a reactor?
-        resolve_all(build_rules, resolve_queue, rule_index, rules);
+        resolve_all(build_rules, runner_state.resolve_queue, rules_cache, job_queue);
 
+        while ((job_queue.size() > 0)
+               && (runner_state.active_jobs.size() < max_concurrent_jobs))
+        {
+            auto rule = job_queue.front();
+            job_queue.pop_front();
+            run_job(rule, runner_state);
+        }
     }
 }
 

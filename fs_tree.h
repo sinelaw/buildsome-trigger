@@ -84,8 +84,8 @@ struct Output {
 
 enum class OutcomeType {
     OutcomeTypeOutputsCreated,
-        OutcomeTypeFailure,
-        };
+    OutcomeTypeFailure,
+};
 
 struct Outcome {
     enum OutcomeType result_type;

@@ -82,9 +82,9 @@ static void run_job(const BuildRule &rule,
         runner_state.outcomes[rule] = o;
     };
 
-    Job job(rule);
     runner_state.active_jobs.insert(rule);
-    job.execute(resolve_cb, completion_cb);
+    Job job(rule, resolve_cb, completion_cb);
+    job.execute();
 }
 
 void build(BuildRules &build_rules, const std::vector<std::string> &targets)

@@ -221,11 +221,12 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
             lck.unlock();
 
             for (auto &th : runners) {
-                TIMEIT(std::unique_lock<std::mutex> lck(th.mutex));
+                TIMEIT(std::unique_lock<std::mutex> th_lck(th.mutex));
                 if (th.o_rule.has_value()) continue;
                 th.o_rule = Optional<BuildRule>(rule);
                 th.cv.notify_all();
 
+                TIMEIT(lck.lock());
                 job_queue.pop_front();
                 lck.unlock();
 

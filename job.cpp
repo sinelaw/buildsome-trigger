@@ -183,8 +183,8 @@ static bool wait_for(pid_t child, const std::string &cmd) {
     }
     ASSERT(wait_child == child);
     if (WEXITSTATUS(wait_res) != 0) {
-        std::cerr << "BUILD FAILED: Child process " << child << " exited with status: " << WEXITSTATUS(wait_res);
-        std::cerr << "BUILD FAILED: Failing command: " << cmd << std::endl;
+        DEBUG("BUILD FAILED: Child process " << child << " exited with status: " << WEXITSTATUS(wait_res));
+        DEBUG("BUILD FAILED: Failing command: " << cmd);
         exit(1);
     }
     return true;
@@ -510,7 +510,7 @@ void Job::th_execute()
         delete th;
     }
     // LOG("Done accepting, waiting for child: %d", child);
-    // LOG("Child %d terminated", child);
+    LOG("Child terminated: " << child);
     close(sock_fd);
 
     // std::cerr << "Build: '" << target_ctx->path << "' - Done" << std::endl;

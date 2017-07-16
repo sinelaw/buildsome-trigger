@@ -19,7 +19,7 @@ CC=${GCC} -g ${WARNINGS} -std=gnu11
 
 
 $./out:
-	mkdir "$@"
+	mkdir -p "$@"
 
 $./out/%.o: $./%.cpp
 	${CXX} -c "$<" -o "$@"

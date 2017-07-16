@@ -79,7 +79,7 @@ static void run_job(const BuildRule &rule,
     // 2. all forks/execs done by this command are allowed in parallel
     // 3. at most one resolution of a command's input is run in parallel,
     //    any more are put on the queue
-    std::cerr << "Running: " << rule.to_string() << std::endl;
+    DEBUG("Running: " << rule.to_string());
 
     auto resolve_cb = [&](std::string input, std::function<void(void)> done) {
         DEBUG("resolve cb: " << input);
@@ -90,7 +90,7 @@ static void run_job(const BuildRule &rule,
     };
 
     auto completion_cb = [&](void) {
-        std::cerr << "Done: " << rule.to_string() << std::endl;
+        DEBUG("Done: '" << rule.to_string() << "'");
         std::unique_lock<std::mutex> lck (runner_state.mtx);
         auto found_job = runner_state.active_jobs.find(rule);
         ASSERT(found_job != runner_state.active_jobs.end());
@@ -100,9 +100,8 @@ static void run_job(const BuildRule &rule,
 //        runner_state.outcomes[rule] = o;
     };
 
-    Job *const job = new Job(rule, resolve_cb, completion_cb);
-
     std::unique_lock<std::mutex> lck (runner_state.mtx);
+    Job *const job = new Job(rule, resolve_cb, completion_cb);
     runner_state.active_jobs[rule] = job;
 }
 

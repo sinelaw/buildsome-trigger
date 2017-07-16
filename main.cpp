@@ -29,6 +29,7 @@ private:
     std::mutex resolve_mtx;
 
 public:
+    std::deque<std::pair<BuildRule, std::function<void(void)> > > sub_jobs;
     std::map<BuildRule, Job*> active_jobs;
     std::deque<Job *> done_jobs;
     std::map<BuildRule, Outcome> outcomes;
@@ -141,12 +142,11 @@ static void done_handler(RunnerState *runner_state, std::function<void(void)> do
         return;
     }
     TIMEIT(std::unique_lock<std::mutex> lck (runner_state->mtx));
-    const bool not_build_yet = runner_state->outcomes.find(rule.get_value()) == runner_state->outcomes.end();
-    lck.unlock();
-    if (not_build_yet) {
-        run_job(rule.get_value(), *runner_state);
+    if (runner_state->outcomes.find(rule.get_value()) != runner_state->outcomes.end()) {
+        done();
+        return;
     }
-    done();
+    runner_state->sub_jobs.push_back(std::pair<BuildRule, std::function<void(void) > >(rule.get_value(), done));
 }
 
 constexpr const uint32_t max_concurrent_jobs = 4;
@@ -185,6 +185,7 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
                             return;
                         }
                     }
+                    lck.unlock();
                     run_job(th.o_rule.get_value(), runner_state);
                     th.o_rule = Optional<BuildRule>();
                 }
@@ -205,6 +206,8 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
 
     uint64_t jobs_started = 0;
     uint64_t jobs_finished = 0;
+
+    std::vector<std::thread *> sub_job_threads;
 
     while (true)
     {
@@ -227,6 +230,15 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
             }
         }
 
+        while (runner_state.sub_jobs.size() > 0) {
+            auto sub_job = runner_state.sub_jobs.front();
+            runner_state.sub_jobs.pop_front();
+            sub_job_threads.push_back(new std::thread([sub_job, &runner_state]() {
+                        run_job(sub_job.first, runner_state);
+                        sub_job.second();
+                    }));
+        }
+
         while (runner_state.done_jobs.size() > 0) {
             auto job = runner_state.done_jobs.front();
             runner_state.done_jobs.pop_front();
@@ -244,6 +256,10 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
     shutdown = true;
     DEBUG("waiting for resolve thread");
     resolve_th.join();
+    for (auto th : sub_job_threads) {
+        th->join();
+        delete th;
+    }
     for (auto &th : runners) {
         while (!th.shutting_down) {
             TIMEIT(std::unique_lock<std::mutex> lck(th.mutex));

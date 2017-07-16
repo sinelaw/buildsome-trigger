@@ -24,6 +24,8 @@ extern "C" {
 
 extern std::mutex debug_lock;
 
+#ifdef PRINT_DEBUG
+
 #define DEBUG(x) do {                                                   \
         /* std::unique_lock<std::mutex> lck (debug_lock);                  \ */ \
         if ((1)) {                                                      \
@@ -33,6 +35,11 @@ extern std::mutex debug_lock;
         }                                                               \
     } while (0)
 
+#else
+
+#define DEBUG(x)
+
+#endif
 
 
 #define CONCAT_(A, B) A ## B
@@ -46,7 +53,7 @@ extern std::mutex debug_lock;
         auto CONCAT(after_, counter) = std::chrono::steady_clock::now(); \
         auto CONCAT(diff_, counter) = CONCAT(after_, counter) - CONCAT(before_, counter); \
         auto CONCAT(micros_diff_, counter) = std::chrono::duration_cast<std::chrono::microseconds>(CONCAT(diff_, counter)); \
-        if (CONCAT(micros_diff_, counter).count() > 1000) DEBUG(CONCAT(micros_diff_, counter).count() << " us: " #act); \
+        if (CONCAT(micros_diff_, counter).count() > 1000) { DEBUG(CONCAT(micros_diff_, counter).count() << " us: " #act); } \
     } while (0)
 
 #define TIMEIT(act) _TIMEIT(act, __COUNTER__)

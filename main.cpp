@@ -231,7 +231,7 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
                 lck.unlock();
 
                 jobs_started++;
-                DEBUG("jobs: " << jobs_finished << "/" << jobs_started);
+                std::cerr << "jobs: " << jobs_finished << "/" << jobs_started << std::endl;
                 break;
             }
         }
@@ -256,6 +256,7 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
             delete job;
             jobs_finished++;
             DEBUG("jobs: " << jobs_finished << "/" << jobs_started);
+            std::cerr << "jobs: " << jobs_finished << "/" << jobs_started << std::endl;
         }
 
         if ((jobs_started > 0) && (jobs_finished == jobs_started)) break;

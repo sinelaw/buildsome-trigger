@@ -172,7 +172,7 @@ static void debug_req(enum func func_id, bool delayed, uint32_t str_size)
     (void)str_size;
 }
 
-static bool wait_for(pid_t child, const std::string &cmd) {
+static bool wait_for(pid_t child, const std::string &cmd __attribute__((unused))) {
     int wait_res;
     int wait_child = waitpid(child, &wait_res, WNOHANG);
     if ((wait_child < 0) && (errno == EINTR)) {

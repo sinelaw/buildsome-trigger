@@ -183,8 +183,8 @@ static bool wait_for(pid_t child, const std::string &cmd) {
     }
     ASSERT(wait_child == child);
     if (WEXITSTATUS(wait_res) != 0) {
-        std::cerr << "BUILD FAILED: Child process %d exited with status: %d\n" << child << WEXITSTATUS(wait_res) << std::endl;
-        std::cerr << "BUILD FAILED: Failing command: %s\n" << cmd << std::endl;
+        std::cerr << "BUILD FAILED: Child process " << child << " exited with status: " << WEXITSTATUS(wait_res);
+        std::cerr << "BUILD FAILED: Failing command: " << cmd << std::endl;
         exit(1);
     }
     return true;

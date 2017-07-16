@@ -68,6 +68,9 @@ void resolve_all(BuildRules &build_rules,
     }
 }
 
+static void done_handler(RunnerState *runner_state, std::function<void(void)> done,
+                         const Optional<BuildRule> &rule);
+
 static void run_job(const BuildRule &rule,
                     RunnerState &runner_state)
 {
@@ -80,21 +83,10 @@ static void run_job(const BuildRule &rule,
 
     auto resolve_cb = [&](std::string input, std::function<void(void)> done) {
         DEBUG("resolve cb: " << input);
-        const std::function<void(const Optional<BuildRule> &)> done_handler =
-        [&](const Optional<BuildRule> &res_rule)
-        {
-            DEBUG("done resolve cb: " << input);
-            std::unique_lock<std::mutex> lck (runner_state.mtx);
-            const bool not_build_yet = (res_rule.has_value()
-                                        && (runner_state.outcomes.find(res_rule.get_value()) == runner_state.outcomes.end()));
-            lck.unlock();
-            if (not_build_yet) {
-                run_job(res_rule.get_value(), runner_state);
-            }
-            done();
-        };
         std::unique_lock<std::mutex> lck (runner_state.mtx);
-        runner_state.resolve_queue.push_back(ResolveRequest(input, &done_handler));
+        auto f = new std::function<void(const Optional<BuildRule> &)>(
+            std::bind(&done_handler, &runner_state, done,  std::placeholders::_1));
+        runner_state.resolve_queue.push_back(ResolveRequest(input, f));
     };
 
     auto completion_cb = [&](void) {
@@ -112,6 +104,21 @@ static void run_job(const BuildRule &rule,
 
     std::unique_lock<std::mutex> lck (runner_state.mtx);
     runner_state.active_jobs[rule] = job;
+}
+
+
+static void done_handler(RunnerState *runner_state, std::function<void(void)> done,
+                         const Optional<BuildRule> &rule)
+{
+    // DEBUG("done resolve cb: " << input);
+    std::unique_lock<std::mutex> lck (runner_state->mtx);
+    const bool not_build_yet = (rule.has_value()
+                                && (runner_state->outcomes.find(rule.get_value()) == runner_state->outcomes.end()));
+    lck.unlock();
+    if (not_build_yet) {
+        run_job(rule.get_value(), *runner_state);
+    }
+    done();
 }
 
 void build(BuildRules &build_rules, const std::vector<std::string> &targets)

@@ -199,8 +199,7 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
                     if (!req.has_value()) break;
                     resolve_all(build_rules, runner_state, req.get_value(), rules_cache, job_queue);
                 }
-                std::chrono::milliseconds dur(100);
-                std::this_thread::sleep_for(dur);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
         });
 
@@ -238,8 +237,7 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
         lck.unlock();
 
         if ((jobs_started > 0) && (jobs_finished == jobs_started)) break;
-        std::chrono::milliseconds dur(10);
-        std::this_thread::sleep_for(dur);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
     DEBUG("SHUTDOWN");

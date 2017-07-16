@@ -57,7 +57,7 @@ void resolve_all(BuildRules &build_rules,
             auto found_rule = cached->second;
             DEBUG("Invoking callback on: " << (found_rule.has_value() ? found_rule.get_value().to_string() : "<none>"));
             if (req.cb) (*req.cb)(found_rule);
-            continue;
+            return;
         }
     }
     DEBUG("Resolving: " << req.target);
@@ -176,7 +176,7 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
             });
     }
 
-    std::thread resolve_th([&shutdown, &runner_state]() {
+    std::thread resolve_th([&build_rules, &shutdown, &runner_state, &rules_cache]() {
             while (!shutdown) {
                 runner_state.wait_for_resolve_queue();
                 ASSERT(runner_state.resolve_queue.size() > 0);

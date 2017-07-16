@@ -36,12 +36,12 @@ public:
 
     void resolve_enqueue(std::string target,
                          std::function<void(const Optional<BuildRule> &)> *cb) {
-        std::unique_lock<std::mutex> lck (this->resolve_mtx);
+        TIMEIT(std::unique_lock<std::mutex> lck (this->resolve_mtx));
         this->resolve_queue.push_back(ResolveRequest(target, cb));
     }
 
     Optional<ResolveRequest> resolve_dequeue() {
-        std::unique_lock<std::mutex> lck (this->resolve_mtx);
+        TIMEIT(std::unique_lock<std::mutex> lck (this->resolve_mtx));
         if (this->resolve_queue.size() == 0) return Optional<ResolveRequest>();
         auto req = this->resolve_queue.front();
         this->resolve_queue.pop_front();
@@ -49,7 +49,7 @@ public:
     }
 
     bool resolve_has_items() {
-        std::unique_lock<std::mutex> lck (this->resolve_mtx);
+        TIMEIT(std::unique_lock<std::mutex> lck (this->resolve_mtx));
         return (this->resolve_queue.size() > 0);
     }
 };
@@ -95,7 +95,7 @@ static void run_job(const BuildRule &rule,
     // 3. at most one resolution of a command's input is run in parallel,
     //    any more are put on the queue
 
-    std::unique_lock<std::mutex> lck (runner_state.mtx);
+    TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
 
     if (runner_state.active_jobs.find(rule) != runner_state.active_jobs.end()) {
         return;
@@ -140,7 +140,7 @@ static void done_handler(RunnerState *runner_state, std::function<void(void)> do
         done();
         return;
     }
-    std::unique_lock<std::mutex> lck (runner_state->mtx);
+    TIMEIT(std::unique_lock<std::mutex> lck (runner_state->mtx));
     const bool not_build_yet = runner_state->outcomes.find(rule.get_value()) == runner_state->outcomes.end();
     lck.unlock();
     if (not_build_yet) {
@@ -177,7 +177,7 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
         th.shutting_down = false;
         th.thread = new std::thread([&th, &shutdown, &runner_state, &job_queue]() {
                 while (!shutdown) {
-                    std::unique_lock<std::mutex> lck(th.mutex);
+                    TIMEIT(std::unique_lock<std::mutex> lck(th.mutex));
                     while (!th.o_rule.has_value()) {
                         th.cv.wait(lck);
                         if (shutdown) {
@@ -210,14 +210,14 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
     while (true)
     {
         // TODO: bg thread? or use async IO and a reactor?
-        std::unique_lock<std::mutex> lck (runner_state.mtx);
+        TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
 
         while ((job_queue.size() > 0)
             && (runner_state.active_jobs.size() < max_concurrent_jobs))
         {
             auto rule = job_queue.front();
             for (auto &th : runners) {
-                std::unique_lock<std::mutex> lck(th.mutex);
+                TIMEIT(std::unique_lock<std::mutex> lck(th.mutex));
                 if (th.o_rule.has_value()) continue;
                 th.o_rule = Optional<BuildRule>(rule);
                 th.cv.notify_all();
@@ -248,7 +248,7 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
     resolve_th.join();
     for (auto &th : runners) {
         while (!th.shutting_down) {
-            std::unique_lock<std::mutex> lck(th.mutex);
+            TIMEIT(std::unique_lock<std::mutex> lck(th.mutex));
             th.cv.notify_all();
         }
         DEBUG("waiting for thread");

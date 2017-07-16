@@ -81,7 +81,7 @@ static void run_job(const BuildRule &rule,
     //    any more are put on the queue
     DEBUG("Running: " << rule.to_string());
 
-    auto resolve_cb = [&](std::string input, std::function<void(void)> done) {
+    auto resolve_cb = [=, &runner_state](std::string input, std::function<void(void)> done) {
         DEBUG("resolve cb: " << input);
         std::unique_lock<std::mutex> lck (runner_state.mtx);
         auto f = new std::function<void(const Optional<BuildRule> &)>(
@@ -89,7 +89,7 @@ static void run_job(const BuildRule &rule,
         runner_state.resolve_queue.push_back(ResolveRequest(input, f));
     };
 
-    auto completion_cb = [&](void) {
+    auto completion_cb = [=, &runner_state](void) {
         DEBUG("Done: '" << rule.to_string() << "'");
         std::unique_lock<std::mutex> lck (runner_state.mtx);
         auto found_job = runner_state.active_jobs.find(rule);
@@ -103,6 +103,7 @@ static void run_job(const BuildRule &rule,
     std::unique_lock<std::mutex> lck (runner_state.mtx);
     Job *const job = new Job(rule, resolve_cb, completion_cb);
     runner_state.active_jobs[rule] = job;
+    DEBUG("Added " << rule.to_string() << " with job " << job);
 }
 
 

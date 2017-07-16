@@ -15,6 +15,7 @@ struct BuildRule {
     }
 
     std::string to_string() const {
+        ASSERT(outputs.size() > 0);
         return outputs.front();
     }
 };

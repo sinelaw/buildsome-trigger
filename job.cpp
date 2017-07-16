@@ -6,6 +6,7 @@
 #include <functional>
 #include <string>
 #include <thread>
+#include <chrono>
 #include <condition_variable>
 
 #include <cinttypes>
@@ -414,7 +415,7 @@ void Job::want(std::string input)
 
 uint32_t global_child_idx = 0;
 
-void Job::th_execute()
+void Job::execute()
 {
     const uint32_t child_idx = global_child_idx;
     global_child_idx++;
@@ -512,10 +513,10 @@ void Job::th_execute()
             while (true) {
                 std::unique_lock<std::mutex> lck (mtx);
                 if (started) break;
-                usleep(10);
+                std::this_thread::sleep_for(10 * std::chrono::milliseconds());
             }
         }
-        usleep(10);
+        std::this_thread::sleep_for(10 * std::chrono::milliseconds());
     }
 
     for (auto th : threads) {
@@ -527,10 +528,4 @@ void Job::th_execute()
     close(sock_fd);
 
     // std::cerr << "Build: '" << target_ctx->path << "' - Done" << std::endl;
-}
-
-void Job::wait() {
-    DEBUG("Waiting: " << this);
-    m_exec_thread.join();
-    DEBUG("Done waiting " << this);
 }

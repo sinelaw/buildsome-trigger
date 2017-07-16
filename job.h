@@ -15,10 +15,6 @@ class Job {
                        std::function<void(void)>)> m_resolve_input_cb;
     std::function<void(void)> m_completion_cb;
 
-    void th_execute(void);
-
-    std::thread m_exec_thread;
-
 public:
     explicit Job(const BuildRule &rule,
                  std::function<void(std::string,
@@ -27,14 +23,9 @@ public:
         : m_rule(rule)
         , m_resolve_input_cb(resolve_input_cb)
         , m_completion_cb(completion_cb)
-        , m_exec_thread([&]() {
-                this->th_execute();
-                this->m_completion_cb();
-            })
     {
     };
 
-    void wait();
-
+    void execute();
     void want(std::string);
 };

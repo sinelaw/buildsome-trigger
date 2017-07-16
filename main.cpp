@@ -74,6 +74,12 @@ static void done_handler(RunnerState *runner_state, std::function<void(void)> do
 static void run_job(const BuildRule &rule,
                     RunnerState &runner_state)
 {
+    // 1. execute command
+    // 2. all forks/execs done by this command are allowed in parallel
+    // 3. at most one resolution of a command's input is run in parallel,
+    //    any more are put on the queue
+
+    std::unique_lock<std::mutex> lck (runner_state.mtx);
 
     if (runner_state.active_jobs.find(rule) != runner_state.active_jobs.end()) {
         return;
@@ -82,13 +88,9 @@ static void run_job(const BuildRule &rule,
         return;
     }
 
-    // 1. execute command
-    // 2. all forks/execs done by this command are allowed in parallel
-    // 3. at most one resolution of a command's input is run in parallel,
-    //    any more are put on the queue
     DEBUG("Running: " << rule.to_string());
 
-    auto resolve_cb = [=, &runner_state](std::string input, std::function<void(void)> done) {
+    auto resolve_cb = [rule, &runner_state](std::string input, std::function<void(void)> done) {
         DEBUG("resolve cb: " << input);
         std::unique_lock<std::mutex> lck (runner_state.mtx);
         auto f = new std::function<void(const Optional<BuildRule> &)>(
@@ -96,7 +98,7 @@ static void run_job(const BuildRule &rule,
         runner_state.resolve_queue.push_back(ResolveRequest(input, f));
     };
 
-    auto completion_cb = [=, &runner_state](void) {
+    auto completion_cb = [rule, &runner_state](void) {
         DEBUG("Done: '" << rule.to_string() << "'");
         std::unique_lock<std::mutex> lck (runner_state.mtx);
         auto found_job = runner_state.active_jobs.find(rule);
@@ -108,10 +110,13 @@ static void run_job(const BuildRule &rule,
         runner_state.outcomes[rule] = Outcome();
     };
 
-    std::unique_lock<std::mutex> lck (runner_state.mtx);
     Job *const job = new Job(rule, resolve_cb, completion_cb);
     runner_state.active_jobs[rule] = job;
     DEBUG("Added " << rule.to_string() << " with job " << job);
+    lck.unlock();
+
+    job->execute();
+    DEBUG("Done " << rule.to_string() << " with job " << job);
 }
 
 
@@ -129,10 +134,32 @@ static void done_handler(RunnerState *runner_state, std::function<void(void)> do
     done();
 }
 
+constexpr const uint32_t max_concurrent_jobs = 4;
+
+void try_run_job(RunnerState &runner_state, std::deque<BuildRule> &job_queue)
+{
+    std::unique_lock<std::mutex> lck (runner_state.mtx);
+
+    if ((job_queue.size() > 0)
+        && (runner_state.active_jobs.size() < max_concurrent_jobs))
+    {
+        auto rule = job_queue.front();
+        job_queue.pop_front();
+        lck.unlock();
+        run_job(rule, runner_state);
+        lck.lock();
+    }
+
+    while (runner_state.done_jobs.size() > 0) {
+        auto job = runner_state.done_jobs.front();
+        runner_state.done_jobs.pop_front();
+        delete job;
+    }
+}
+
+
 void build(BuildRules &build_rules, const std::vector<std::string> &targets)
 {
-    constexpr const uint32_t max_concurrent_jobs = 4;
-
     RunnerState runner_state;
     for (auto target : targets) {
         DEBUG("Enqueing: " << target);
@@ -140,6 +167,20 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
     }
     std::map<std::string, Optional<BuildRule>> rules_cache;
     std::deque<BuildRule> job_queue;
+
+    bool shutdown = false;
+
+    const uint32_t runners_count = 4;
+    std::thread *runners[runners_count];
+    for (auto &th : runners) {
+        th = new std::thread([&shutdown, &runner_state, &job_queue]() {
+                while (!shutdown) {
+                    std::this_thread::sleep_for(100 * std::chrono::milliseconds());
+                    try_run_job(runner_state, job_queue);
+                }
+            });
+    }
+
     while (runner_state.resolve_queue.size() > 0
            || (job_queue.size() > 0)
            || (runner_state.done_jobs.size() > 0)
@@ -147,23 +188,15 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
     {
         // TODO: bg thread? or use async IO and a reactor?
         resolve_all(build_rules, runner_state, rules_cache, job_queue);
-
-        while ((job_queue.size() > 0)
-               && (runner_state.active_jobs.size() < max_concurrent_jobs))
-        {
-            auto rule = job_queue.front();
-            job_queue.pop_front();
-            run_job(rule, runner_state);
-        }
-
-        while (runner_state.done_jobs.size() > 0) {
-            auto job = runner_state.done_jobs.front();
-            runner_state.done_jobs.pop_front();
-            job->wait();
-            delete job;
-        }
+        std::this_thread::sleep_for(10 * std::chrono::milliseconds());
     }
 
+    shutdown = true;
+    for (auto &th : runners) {
+        th->join();
+        delete th;
+        th = nullptr;
+    }
 }
 
 int main(int argc, char **argv)

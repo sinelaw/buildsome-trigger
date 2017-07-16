@@ -39,15 +39,16 @@ void resolve_all(BuildRules &build_rules,
     while (runner_state.resolve_queue.size() > 0) {
         auto req = runner_state.resolve_queue.front();
         runner_state.resolve_queue.pop_front();
-        auto cached = rules_cache.find(req.target);
-        if (cached != rules_cache.end()) {
-            auto found_rule = cached->second;
-            lck.unlock();
-            DEBUG("Invoking callback on: " << (found_rule.has_value() ? found_rule.get_value().to_string() : "<none>"));
-            if (req.cb) (*req.cb)(found_rule);
-            lck.lock();
-
-            continue;
+        {
+            auto cached = rules_cache.find(req.target);
+            if (cached != rules_cache.end()) {
+                auto found_rule = cached->second;
+                lck.unlock();
+                DEBUG("Invoking callback on: " << (found_rule.has_value() ? found_rule.get_value().to_string() : "<none>"));
+                if (req.cb) (*req.cb)(found_rule);
+                lck.lock();
+                continue;
+            }
         }
         DEBUG("Resolving: " << req.target);
         const Optional<BuildRule> orule = build_rules.query(req.target);
@@ -59,13 +60,11 @@ void resolve_all(BuildRules &build_rules,
                 runner_state.resolve_queue.push_back(ResolveRequest(input));
             }
             rules.push_back(rule);
-
-            auto found_rule = cached->second;
-            lck.unlock();
-            DEBUG("Invoking callback on: " << (found_rule.has_value() ? found_rule.get_value().to_string() : "<none>"));
-            if (req.cb) (*req.cb)(found_rule);
-            lck.lock();
         }
+        DEBUG("Invoking callback on: " << (orule.has_value() ? orule.get_value().to_string() : "<none>"));
+        lck.unlock();
+        if (req.cb) (*req.cb)(orule);
+        lck.lock();
     }
 }
 

@@ -4,6 +4,7 @@
 /.gitignore
 /out
 /out/build_rules.o
+/out/debug.o
 /out/fs_override.so
 /out/fs_tree.o
 /out/job.o

@@ -121,7 +121,7 @@ static void run_job(const BuildRule &rule,
     job->execute();
     DEBUG("Done: '" << rule.to_string() << "'");
 
-    lck.lock();
+    TIMEIT(lck.lock());
     auto found_job = runner_state.active_jobs.find(rule);
     ASSERT(found_job != runner_state.active_jobs.end());
     runner_state.done_jobs.push_back(found_job->second);
@@ -238,7 +238,7 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
         lck.unlock();
 
         if ((jobs_started > 0) && (jobs_finished == jobs_started)) break;
-        std::chrono::milliseconds dur(100);
+        std::chrono::milliseconds dur(10);
         std::this_thread::sleep_for(dur);
     }
 

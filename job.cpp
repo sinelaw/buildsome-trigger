@@ -513,10 +513,11 @@ void Job::execute()
             while (true) {
                 std::unique_lock<std::mutex> lck (mtx);
                 if (started) break;
-                std::this_thread::sleep_for(10 * std::chrono::milliseconds());
+                lck.unlock();
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
         }
-        std::this_thread::sleep_for(10 * std::chrono::milliseconds());
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
     for (auto th : threads) {

@@ -27,7 +27,6 @@ struct RunnerState {
 private:
     std::deque<ResolveRequest> resolve_queue;
     std::mutex resolve_mtx;
-    std::condition_variable resolve_cv;
 
 public:
     std::map<BuildRule, Job*> active_jobs;
@@ -39,12 +38,6 @@ public:
                          std::function<void(const Optional<BuildRule> &)> *cb) {
         std::unique_lock<std::mutex> lck (this->resolve_mtx);
         this->resolve_queue.push_back(ResolveRequest(target, cb));
-        this->resolve_cv.notify_all();
-    }
-
-    void resolve_wait_for_items() {
-        std::unique_lock<std::mutex> lck (this->resolve_mtx);
-        this->resolve_cv.wait(lck);
     }
 
     Optional<ResolveRequest> resolve_dequeue() {
@@ -120,25 +113,22 @@ static void run_job(const BuildRule &rule,
         runner_state.resolve_enqueue(input, f);
     };
 
-    auto completion_cb = [rule, &runner_state](void) {
-        DEBUG("Done: '" << rule.to_string() << "'");
-        std::unique_lock<std::mutex> lck (runner_state.mtx);
-        auto found_job = runner_state.active_jobs.find(rule);
-        ASSERT(found_job != runner_state.active_jobs.end());
-        runner_state.done_jobs.push_back(found_job->second);
-        auto erased_count = runner_state.active_jobs.erase(rule);
-        ASSERT(1 == erased_count);
-        DEBUG("Done job: " << found_job->second);
-        runner_state.outcomes[rule] = Outcome();
-    };
-
-    Job *const job = new Job(rule, resolve_cb, completion_cb);
+    Job *const job = new Job(rule, resolve_cb);
     runner_state.active_jobs[rule] = job;
     DEBUG("Added " << rule.to_string() << " with job " << job);
     lck.unlock();
 
     job->execute();
-    DEBUG("Done " << rule.to_string() << " with job " << job);
+    DEBUG("Done: '" << rule.to_string() << "'");
+
+    lck.lock();
+    auto found_job = runner_state.active_jobs.find(rule);
+    ASSERT(found_job != runner_state.active_jobs.end());
+    runner_state.done_jobs.push_back(found_job->second);
+    auto erased_count = runner_state.active_jobs.erase(rule);
+    ASSERT(1 == erased_count);
+    DEBUG("Done job: " << found_job->second);
+    runner_state.outcomes[rule] = Outcome();
 }
 
 
@@ -146,9 +136,12 @@ static void done_handler(RunnerState *runner_state, std::function<void(void)> do
                          const Optional<BuildRule> &rule)
 {
     // DEBUG("done resolve cb: " << input);
+    if (!rule.has_value()) {
+        done();
+        return;
+    }
     std::unique_lock<std::mutex> lck (runner_state->mtx);
-    const bool not_build_yet = (rule.has_value()
-                                && (runner_state->outcomes.find(rule.get_value()) == runner_state->outcomes.end()));
+    const bool not_build_yet = runner_state->outcomes.find(rule.get_value()) == runner_state->outcomes.end();
     lck.unlock();
     if (not_build_yet) {
         run_job(rule.get_value(), *runner_state);
@@ -175,73 +168,90 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
         Optional<BuildRule> o_rule;
         std::mutex mutex;
         std::condition_variable cv;
+        bool shutting_down;
     };
+
     ThreadInfo runners[runners_count];
     for (auto &th : runners) {
         th.o_rule = Optional<BuildRule>();
+        th.shutting_down = false;
         th.thread = new std::thread([&th, &shutdown, &runner_state, &job_queue]() {
                 while (!shutdown) {
                     std::unique_lock<std::mutex> lck(th.mutex);
                     while (!th.o_rule.has_value()) {
                         th.cv.wait(lck);
+                        if (shutdown) {
+                            th.shutting_down = true;
+                            return;
+                        }
                     }
                     run_job(th.o_rule.get_value(), runner_state);
                     th.o_rule = Optional<BuildRule>();
                 }
+                th.shutting_down = true;
             });
     }
 
     std::thread resolve_th([&build_rules, &shutdown, &runner_state, &rules_cache, &job_queue]() {
             while (!shutdown) {
-                runner_state.resolve_wait_for_items();
                 while (true) {
                     auto req = runner_state.resolve_dequeue();
                     if (!req.has_value()) break;
                     resolve_all(build_rules, runner_state, req.get_value(), rules_cache, job_queue);
                 }
+                std::chrono::milliseconds dur(100);
+                std::this_thread::sleep_for(dur);
             }
         });
+
+    uint64_t jobs_started = 0;
+    uint64_t jobs_finished = 0;
 
     while (true)
     {
         // TODO: bg thread? or use async IO and a reactor?
         std::unique_lock<std::mutex> lck (runner_state.mtx);
 
-        if ((job_queue.size() > 0)
+        while ((job_queue.size() > 0)
             && (runner_state.active_jobs.size() < max_concurrent_jobs))
         {
             auto rule = job_queue.front();
-            job_queue.pop_front();
             for (auto &th : runners) {
                 std::unique_lock<std::mutex> lck(th.mutex);
                 if (th.o_rule.has_value()) continue;
                 th.o_rule = Optional<BuildRule>(rule);
                 th.cv.notify_all();
+                job_queue.pop_front();
+                jobs_started++;
+                DEBUG("jobs: " << jobs_finished << "/" << jobs_started);
+                break;
             }
-        }
-
-        if (!runner_state.resolve_has_items()
-            && (job_queue.size() == 0)
-            && (runner_state.done_jobs.size() == 0)
-            && (runner_state.active_jobs.size() == 0))
-        {
-            break;
         }
 
         while (runner_state.done_jobs.size() > 0) {
             auto job = runner_state.done_jobs.front();
             runner_state.done_jobs.pop_front();
             delete job;
+            jobs_finished++;
+            DEBUG("jobs: " << jobs_finished << "/" << jobs_started);
         }
         lck.unlock();
 
+        if ((jobs_started > 0) && (jobs_finished == jobs_started)) break;
         std::chrono::milliseconds dur(100);
         std::this_thread::sleep_for(dur);
     }
 
+    DEBUG("SHUTDOWN");
     shutdown = true;
+    DEBUG("waiting for resolve thread");
     resolve_th.join();
     for (auto &th : runners) {
+        while (!th.shutting_down) {
+            std::unique_lock<std::mutex> lck(th.mutex);
+            th.cv.notify_all();
+        }
+        DEBUG("waiting for thread");
         th.thread->join();
         delete th.thread;
         th.thread = nullptr;

@@ -25,6 +25,6 @@ extern "C" {
 extern std::mutex debug_lock;
 
 #define DEBUG(x) do {                                                   \
-        std::unique_lock<std::mutex> lck (debug_lock);                  \
+        /* std::unique_lock<std::mutex> lck (debug_lock);                  \ */\
         std::cerr << pthread_self() << ":" << __FILE__ << ":" << __LINE__ << ": " << x << std::endl; \
     } while (0)

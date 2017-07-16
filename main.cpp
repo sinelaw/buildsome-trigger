@@ -75,6 +75,13 @@ static void run_job(const BuildRule &rule,
                     RunnerState &runner_state)
 {
 
+    if (runner_state.active_jobs.find(rule) != runner_state.active_jobs.end()) {
+        return;
+    }
+    if (runner_state.outcomes.find(rule) != runner_state.outcomes.end()) {
+        return;
+    }
+
     // 1. execute command
     // 2. all forks/execs done by this command are allowed in parallel
     // 3. at most one resolution of a command's input is run in parallel,
@@ -97,7 +104,8 @@ static void run_job(const BuildRule &rule,
         runner_state.done_jobs.push_back(found_job->second);
         auto erased_count = runner_state.active_jobs.erase(rule);
         ASSERT(1 == erased_count);
-//        runner_state.outcomes[rule] = o;
+        DEBUG("Done job: " << found_job->second);
+        runner_state.outcomes[rule] = Outcome();
     };
 
     std::unique_lock<std::mutex> lck (runner_state.mtx);

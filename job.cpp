@@ -493,14 +493,27 @@ void Job::th_execute()
     while (!wait_for(child, cmd)) {
         const Optional<int> o_conn_fd = trigger_accept(sock_fd, &addr);
         if (o_conn_fd.has_value()) {
+            std::mutex mtx;
+            bool started = false;
             int connection_fd = o_conn_fd.get_value();
+            LOG("Spawning: " << connection_fd);
             std::thread *accept_thread = new std::thread([&](){
                     LOG("Handling: " << connection_fd);
+                    {
+                        std::unique_lock<std::mutex> lck (mtx);
+                        started = true;
+                    }
+                    LOG("Started Handling: " << connection_fd);
                     handle_connection(*this, connection_fd);
+                    LOG("Closing " << connection_fd);
                     close(connection_fd);
-                    LOG("Terminating");
                 });
             threads.emplace_back(accept_thread);
+            while (true) {
+                std::unique_lock<std::mutex> lck (mtx);
+                if (started) break;
+                usleep(10);
+            }
         }
         usleep(10);
     }
@@ -517,5 +530,7 @@ void Job::th_execute()
 }
 
 void Job::wait() {
+    DEBUG("Waiting: " << this);
     m_exec_thread.join();
+    DEBUG("Done waiting " << this);
 }

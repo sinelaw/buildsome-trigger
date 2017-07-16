@@ -64,7 +64,7 @@ void resolve_all(BuildRules &build_rules,
         auto cached = rules_cache.find(req.target);
         if (cached != rules_cache.end()) {
             auto found_rule = cached->second;
-            DEBUG("Invoking callback on: " << (found_rule.has_value() ? found_rule.get_value().to_string() : "<none>"));
+            DEBUG("(cached) Invoking callback on: " << (found_rule.has_value() ? found_rule.get_value().to_string() : "<none>"));
             if (req.cb) (*req.cb)(found_rule);
             return;
         }

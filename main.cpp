@@ -24,24 +24,40 @@ public:
 };
 
 struct RunnerState {
+private:
     std::deque<ResolveRequest> resolve_queue;
     std::mutex resolve_mtx;
     std::condition_variable resolve_cv;
 
+public:
     std::map<BuildRule, Job*> active_jobs;
     std::deque<Job *> done_jobs;
     std::map<BuildRule, Outcome> outcomes;
     std::mutex mtx;
 
-    void enqueue_resolve(std::string target,
+    void resolve_enqueue(std::string target,
                          std::function<void(const Optional<BuildRule> &)> *cb) {
         std::unique_lock<std::mutex> lck (this->resolve_mtx);
         this->resolve_queue.push_back(ResolveRequest(target, cb));
         this->resolve_cv.notify_all();
     }
-    void wait_for_resolve_queue() {
+
+    void resolve_wait_for_items() {
         std::unique_lock<std::mutex> lck (this->resolve_mtx);
         this->resolve_cv.wait(lck);
+    }
+
+    Optional<ResolveRequest> resolve_dequeue() {
+        std::unique_lock<std::mutex> lck (this->resolve_mtx);
+        if (this->resolve_queue.size() == 0) return Optional<ResolveRequest>();
+        auto req = this->resolve_queue.front();
+        this->resolve_queue.pop_front();
+        return Optional<ResolveRequest>(req);
+    }
+
+    bool resolve_has_items() {
+        std::unique_lock<std::mutex> lck (this->resolve_mtx);
+        return (this->resolve_queue.size() > 0);
     }
 };
 
@@ -67,7 +83,7 @@ void resolve_all(BuildRules &build_rules,
     if (orule.has_value()) {
         const BuildRule &rule = orule.get_value();
         for (auto input : rule.inputs) {
-            runner_state.enqueue_resolve(input, nullptr);
+            runner_state.resolve_enqueue(input, nullptr);
         }
         rules.push_back(rule);
     }
@@ -99,10 +115,9 @@ static void run_job(const BuildRule &rule,
 
     auto resolve_cb = [rule, &runner_state](std::string input, std::function<void(void)> done) {
         DEBUG("resolve cb: " << input);
-        std::unique_lock<std::mutex> lck (runner_state.mtx);
         auto f = new std::function<void(const Optional<BuildRule> &)>(
             std::bind(&done_handler, &runner_state, done,  std::placeholders::_1));
-        runner_state.resolve_queue.push_back(ResolveRequest(input, f));
+        runner_state.resolve_enqueue(input, f);
     };
 
     auto completion_cb = [rule, &runner_state](void) {
@@ -148,7 +163,7 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
     RunnerState runner_state;
     for (auto target : targets) {
         DEBUG("Enqueing: " << target);
-        runner_state.resolve_queue.push_back(ResolveRequest(target));
+        runner_state.resolve_enqueue(target, nullptr);
     }
     std::map<std::string, Optional<BuildRule>> rules_cache;
     std::deque<BuildRule> job_queue;
@@ -176,14 +191,13 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
             });
     }
 
-    std::thread resolve_th([&build_rules, &shutdown, &runner_state, &rules_cache]() {
+    std::thread resolve_th([&build_rules, &shutdown, &runner_state, &rules_cache, &job_queue]() {
             while (!shutdown) {
-                runner_state.wait_for_resolve_queue();
-                ASSERT(runner_state.resolve_queue.size() > 0);
-                while (runner_state.resolve_queue.size() > 0) {
-                    auto req = runner_state.resolve_queue.front();
-                    runner_state.resolve_queue.pop_front();
-                    resolve_all(build_rules, req, runner_state, rules_cache, job_queue);
+                runner_state.resolve_wait_for_items();
+                while (true) {
+                    auto req = runner_state.resolve_dequeue();
+                    if (!req.has_value()) break;
+                    resolve_all(build_rules, runner_state, req.get_value(), rules_cache, job_queue);
                 }
             }
         });
@@ -206,20 +220,23 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
             }
         }
 
-        if (runner_state.resolve_queue.size() > 0
-            || (job_queue.size() > 0)
-            || (runner_state.done_jobs.size() > 0)
-            || (runner_state.active_jobs.size() > 0))
+        if (!runner_state.resolve_has_items()
+            && (job_queue.size() == 0)
+            && (runner_state.done_jobs.size() == 0)
+            && (runner_state.active_jobs.size() == 0))
         {
-            lck.unlock();
-
+            break;
         }
+
         while (runner_state.done_jobs.size() > 0) {
             auto job = runner_state.done_jobs.front();
             runner_state.done_jobs.pop_front();
             delete job;
         }
-        std::this_thread::sleep_for(100 * std::chrono::milliseconds());
+        lck.unlock();
+
+        std::chrono::milliseconds dur(100);
+        std::this_thread::sleep_for(dur);
     }
 
     shutdown = true;

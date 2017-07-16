@@ -212,41 +212,51 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
     while (true)
     {
         // TODO: bg thread? or use async IO and a reactor?
-        TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
-
-        while ((job_queue.size() > 0)
-            && (runner_state.active_jobs.size() < max_concurrent_jobs))
+        while (true)
         {
+            TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
+            if (job_queue.size() == 0) break;
+            if (runner_state.active_jobs.size() >= max_concurrent_jobs) break;
             auto rule = job_queue.front();
+            lck.unlock();
+
             for (auto &th : runners) {
                 TIMEIT(std::unique_lock<std::mutex> lck(th.mutex));
                 if (th.o_rule.has_value()) continue;
                 th.o_rule = Optional<BuildRule>(rule);
                 th.cv.notify_all();
+
+                lck.lock();
                 job_queue.pop_front();
+                lck.unlock();
+
                 jobs_started++;
                 DEBUG("jobs: " << jobs_finished << "/" << jobs_started);
                 break;
             }
         }
 
-        while (runner_state.sub_jobs.size() > 0) {
+        while (true) {
+            TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
+            if (runner_state.sub_jobs.size() == 0) break;
             auto sub_job = runner_state.sub_jobs.front();
             runner_state.sub_jobs.pop_front();
+            lck.unlock();
             sub_job_threads.push_back(new std::thread([sub_job, &runner_state]() {
                         run_job(sub_job.first, runner_state);
                         sub_job.second();
                     }));
         }
 
-        while (runner_state.done_jobs.size() > 0) {
+        while (true) {
+            TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
+            if (runner_state.done_jobs.size() == 0) break;
             auto job = runner_state.done_jobs.front();
             runner_state.done_jobs.pop_front();
             delete job;
             jobs_finished++;
             DEBUG("jobs: " << jobs_finished << "/" << jobs_started);
         }
-        lck.unlock();
 
         if ((jobs_started > 0) && (jobs_finished == jobs_started)) break;
         std::this_thread::sleep_for(std::chrono::milliseconds(1));

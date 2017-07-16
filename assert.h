@@ -39,6 +39,7 @@ extern std::mutex debug_lock;
 #define CONCAT(A,B) CONCAT_(A,B)
 
 #define _TIMEIT(act, counter)                                           \
+    /* DEBUG("Going to " #act);                                      */ \
     auto CONCAT(before_, counter) = std::chrono::steady_clock::now();   \
     act;                                                                \
     do {                                                                \

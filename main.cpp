@@ -226,7 +226,6 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
                 th.o_rule = Optional<BuildRule>(rule);
                 th.cv.notify_all();
 
-                lck.lock();
                 job_queue.pop_front();
                 lck.unlock();
 

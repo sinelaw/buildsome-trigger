@@ -35,6 +35,8 @@ public:
     std::deque<Job *> done_jobs;
     std::map<BuildRule, Outcome> outcomes;
     std::mutex mtx;
+    uint64_t jobs_started = 0;
+    uint64_t jobs_finished = 0;
 
     void resolve_enqueue(std::string target,
                          const std::function<void(std::string, const Optional<BuildRule> &)> *cb) {
@@ -133,6 +135,7 @@ static bool run_job(const BuildRule &rule,
     Job *const job = new Job(rule, resolve_cb);
     runner_state.active_jobs[rule] = job;
     DEBUG("Added " << rule.to_string() << " with job " << job);
+    runner_state.jobs_started++;
     lck.unlock();
 
     job->execute();
@@ -206,14 +209,11 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
         bool shutting_down;
     };
 
-    uint64_t jobs_started = 0;
-    uint64_t jobs_finished = 0;
-
     ThreadInfo runners[runners_count];
     for (auto &th : runners) {
         th.o_rule = Optional<BuildRule>();
         th.shutting_down = false;
-        th.thread = new std::thread([&jobs_started, &th, &shutdown, &runner_state, &job_queue]() {
+        th.thread = new std::thread([&th, &shutdown, &runner_state, &job_queue]() {
                 while (!shutdown) {
                     TIMEIT(std::unique_lock<std::mutex> lck(th.mutex));
                     while (!th.o_rule.has_value()) {
@@ -223,14 +223,9 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
                             return;
                         }
                     }
-                    jobs_started++;
                     lck.unlock();
 
-                    if (!run_job(th.o_rule.get_value(), runner_state)) {
-                        lck.lock();
-                        jobs_started--;
-                        lck.unlock();
-                    }
+                    run_job(th.o_rule.get_value(), runner_state);
                     th.o_rule = Optional<BuildRule>();
                 }
                 th.shutting_down = true;
@@ -300,18 +295,19 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
             if (runner_state.done_jobs.size() == 0) break;
             auto job = runner_state.done_jobs.front();
             runner_state.done_jobs.pop_front();
-            jobs_finished++;
-            DEBUG("jobs: " << jobs_finished << "/" << jobs_started);
-            PRINT(jobs_finished << "/" << jobs_started << "\t" << job->get_rule().outputs.front());
+            runner_state.jobs_finished++;
+            DEBUG("jobs: " << runner_state.jobs_finished << "/" << runner_state.jobs_started);
+            PRINT(runner_state.jobs_finished << "/" << runner_state.jobs_started << "\t" << job->get_rule().outputs.front());
             delete job;
         }
 
-        if ((jobs_started > 0) && (jobs_started == jobs_finished)) {
+        if ((runner_state.jobs_started > 0) && (runner_state.jobs_started == runner_state.jobs_finished)) {
             TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
             if ((runner_state.sub_jobs.size() == 0)
                 && !runner_state.resolve_has_items()
                 && (runner_state.active_jobs.size() == 0)
-                && (runner_state.done_jobs.size() == 0))
+                && (runner_state.done_jobs.size() == 0)
+                && (job_queue.size() == 0))
             {
                 PRINT("No more work, stopping");
                 break;

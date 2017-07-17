@@ -29,6 +29,7 @@ private:
     std::mutex resolve_mtx;
 
 public:
+    std::map<std::string, Optional<BuildRule>> rules_cache;
     std::deque<std::pair<BuildRule, std::function<void(void)> > > sub_jobs;
     std::map<BuildRule, Job*> active_jobs;
     std::deque<Job *> done_jobs;
@@ -37,8 +38,10 @@ public:
 
     void resolve_enqueue(std::string target,
                          const std::function<void(std::string, const Optional<BuildRule> &)> *cb) {
+        const ResolveRequest req(target, cb);
+        if (this->resolve_lookup_cache(req)) return;
         TIMEIT(std::unique_lock<std::mutex> lck (this->resolve_mtx));
-        this->resolve_queue.push_back(ResolveRequest(target, cb));
+        this->resolve_queue.push_back(req);
     }
 
     Optional<ResolveRequest> resolve_dequeue() {
@@ -47,6 +50,16 @@ public:
         auto req = this->resolve_queue.front();
         this->resolve_queue.pop_front();
         return Optional<ResolveRequest>(req);
+    }
+
+    bool resolve_lookup_cache(const ResolveRequest &req) {
+        TIMEIT(std::unique_lock<std::mutex> lck (this->resolve_mtx));
+        auto cached = this->rules_cache.find(req.target);
+        if (cached == this->rules_cache.end()) return false;
+        auto found_rule = cached->second;
+        DEBUG("(cached) Invoking callback on: " << (found_rule.has_value() ? found_rule.get_value().to_string() : "<none>"));
+        if (req.cb) (*req.cb)(req.target, found_rule);
+        return true;
     }
 
     bool resolve_has_items() {
@@ -68,21 +81,12 @@ const std::function<void(std::string, const Optional<BuildRule> &)> sub_resolve_
 void resolve_all(BuildRules &build_rules,
                  RunnerState &runner_state,
                  const ResolveRequest &req,
-                 std::map<std::string, Optional<BuildRule>> &rules_cache,
                  std::deque<BuildRule> &rules)
 {
-    {
-        auto cached = rules_cache.find(req.target);
-        if (cached != rules_cache.end()) {
-            auto found_rule = cached->second;
-            DEBUG("(cached) Invoking callback on: " << (found_rule.has_value() ? found_rule.get_value().to_string() : "<none>"));
-            if (req.cb) (*req.cb)(req.target, found_rule);
-            return;
-        }
-    }
+    if (runner_state.resolve_lookup_cache(req)) return;
     DEBUG("Resolving: " << req.target);
     const Optional<BuildRule> orule = build_rules.query(req.target);
-    rules_cache[req.target] = orule;
+    runner_state.rules_cache[req.target] = orule;
     DEBUG("Done Resolving: " << req.target);
     if (orule.has_value()) {
         const BuildRule &rule = orule.get_value();
@@ -169,7 +173,6 @@ constexpr const uint32_t max_concurrent_jobs = 4;
 void build(BuildRules &build_rules, const std::vector<std::string> &targets)
 {
     RunnerState runner_state;
-    std::map<std::string, Optional<BuildRule>> rules_cache;
     std::deque<BuildRule> job_queue;
 
     std::vector<std::string> missing_rules;
@@ -183,8 +186,7 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
             }
         };
         resolve_all(build_rules, runner_state,
-                    ResolveRequest(target, &handler),
-                    rules_cache, job_queue);
+                    ResolveRequest(target, &handler), job_queue);
     }
 
     if (missing_rules.size() > 0) {
@@ -226,12 +228,12 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
             });
     }
 
-    std::thread resolve_th([&build_rules, &shutdown, &runner_state, &rules_cache, &job_queue]() {
+    std::thread resolve_th([&build_rules, &shutdown, &runner_state, &job_queue]() {
             while (!shutdown) {
                 while (true) {
                     auto req = runner_state.resolve_dequeue();
                     if (!req.has_value()) break;
-                    resolve_all(build_rules, runner_state, req.get_value(), rules_cache, job_queue);
+                    resolve_all(build_rules, runner_state, req.get_value(), job_queue);
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }

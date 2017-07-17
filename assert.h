@@ -29,7 +29,7 @@ extern std::mutex debug_lock;
 
 /* #define PRINT_DEBUG */
 #define PRINT(x) do {                                                   \
-        std::unique_lock<std::mutex> lck (debug_lock);                  \
+        /*std::unique_lock<std::mutex> lck (debug_lock);*/              \
         std::cerr << x << std::endl;                                    \
     } while (0)
 

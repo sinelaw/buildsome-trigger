@@ -23,6 +23,7 @@ public:
     {
     };
 
+    const BuildRule &get_rule() const { return m_rule; }
     void execute();
     void want(std::string);
 };

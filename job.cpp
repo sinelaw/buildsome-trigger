@@ -105,7 +105,7 @@ static bool checked_recv(int sockfd, void *buf, size_t len)
     while (true) {
         int received = recv(sockfd, pos, len - received_amount, 0);
         if (received < 0) {
-            perror("recv");
+            // perror("recv");
             LOG("recv returned: " << received << " errno: " << errno);
             return false;
         }

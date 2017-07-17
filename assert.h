@@ -24,6 +24,7 @@ extern "C" {
 
 extern std::mutex debug_lock;
 
+//#define PRINT_DEBUG
 #ifdef PRINT_DEBUG
 
 #define DEBUG(x) do {                                                   \

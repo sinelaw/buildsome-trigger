@@ -6,6 +6,9 @@ extern "C" {
 #include <iostream>
 #include <mutex>
 
+
+#define UNUSED_ATTR __attribute__((unused))
+
 #define PANIC(msg) do {                                                 \
         const int errno_ = errno;                                       \
         std::cerr << "PANIC: " << msg << " at " << __FILE__ << ":" << __LINE__ << std::endl; \

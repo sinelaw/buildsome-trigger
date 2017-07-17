@@ -12,8 +12,6 @@
 #include <condition_variable>
 #include <mutex>
 
-#define UNUSED_ATTR __attribute__((unused))
-
 class ResolveRequest {
 public:
     const std::string target;

@@ -24,6 +24,7 @@ extern "C" {
 #include <pthread.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <ftw.h>
 
 #include "fshook/protocol.h"
 }
@@ -413,9 +414,30 @@ void Job::want(std::string input)
                              [&](){
                                  mtx.unlock();
                              });
-    PRINT("[STOP ] " << this->m_rule.outputs.front() << " waiting for: " << input);
+    DEBUG("[STOP ] " << this->m_rule.outputs.front() << " waiting for: " << input);
     mtx.lock();
-    PRINT("[CONT ] " << this->m_rule.outputs.front() << " waiting for: " << input << " [DONE]");
+    DEBUG("[CONT ] " << this->m_rule.outputs.front() << " waiting for: " << input << " [DONE]");
+}
+
+
+static int remove_fn(const char *fpath, const struct stat *sb UNUSED_ATTR,
+                     int typeflag, struct FTW *ftwbuf UNUSED_ATTR)
+{
+    if (typeflag & FTW_D) {
+        LOG("rmdir " << fpath);
+        ASSERT(0 == rmdir(fpath));
+    } else {
+        LOG("unlink " << fpath);
+        ASSERT(0 == unlink(fpath));
+    }
+    return 0;
+}
+
+static void remove_dir_recursively(const char *dirpath)
+{
+    const int nopenfd = 10;
+    const int res = nftw(dirpath, remove_fn, nopenfd, FTW_DEPTH);
+    ASSERT(0 == res);
 }
 
 uint32_t global_child_idx = 0;
@@ -430,6 +452,21 @@ void Job::execute()
     std::string cmd;
     for (auto line : m_rule.commands) {
         cmd += "\n" + line;
+    }
+
+    for (auto output : m_rule.outputs) {
+        struct stat output_file_stat;
+        if (0 == stat(output.c_str(), &output_file_stat)) {
+            PRINT("[REMOV] " << output);
+            if (output_file_stat.st_mode & S_IFDIR) {
+                remove_dir_recursively(output.c_str());
+            } else {
+                LOG("unlink " << output.c_str());
+                ASSERT(0 == unlink(output.c_str()));
+            }
+        } else {
+            ASSERT(ENOENT == errno);
+        }
     }
 
     std::ostringstream stringStream;

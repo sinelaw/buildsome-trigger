@@ -154,12 +154,28 @@ constexpr const uint32_t max_concurrent_jobs = 4;
 void build(BuildRules &build_rules, const std::vector<std::string> &targets)
 {
     RunnerState runner_state;
-    for (auto target : targets) {
-        DEBUG("Enqueing: " << target);
-        runner_state.resolve_enqueue(target, nullptr);
-    }
     std::map<std::string, Optional<BuildRule>> rules_cache;
     std::deque<BuildRule> job_queue;
+
+    std::vector<std::string> missing_rules;
+    for (auto target : targets) {
+        DEBUG("Enqueing: " << target);
+        std::function<void(const Optional<BuildRule> &)> handler = [&target, &missing_rules](const Optional<BuildRule> &rule){
+            if (!rule.has_value()) {
+                missing_rules.push_back(target);
+            }
+        };
+        resolve_all(build_rules, runner_state,
+                    ResolveRequest(target, &handler),
+                    rules_cache, job_queue);
+    }
+
+    if (missing_rules.size() > 0) {
+        for (auto m : missing_rules) {
+            std::cerr << "Failed to resolve: " << m << std::endl;
+        }
+        exit(1);
+    }
 
     bool shutdown = false;
     const uint32_t runners_count = 4;

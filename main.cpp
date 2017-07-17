@@ -206,11 +206,14 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
         bool shutting_down;
     };
 
+    uint64_t jobs_started = 0;
+    uint64_t jobs_finished = 0;
+
     ThreadInfo runners[runners_count];
     for (auto &th : runners) {
         th.o_rule = Optional<BuildRule>();
         th.shutting_down = false;
-        th.thread = new std::thread([&th, &shutdown, &runner_state, &job_queue]() {
+        th.thread = new std::thread([&jobs_started, &th, &shutdown, &runner_state, &job_queue]() {
                 while (!shutdown) {
                     TIMEIT(std::unique_lock<std::mutex> lck(th.mutex));
                     while (!th.o_rule.has_value()) {
@@ -220,7 +223,9 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
                             return;
                         }
                     }
+                    jobs_started++;
                     lck.unlock();
+
                     run_job(th.o_rule.get_value(), runner_state);
                     th.o_rule = Optional<BuildRule>();
                 }
@@ -238,9 +243,6 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
         });
-
-    uint64_t jobs_started = 0;
-    uint64_t jobs_finished = 0;
 
     std::vector<std::thread *> sub_job_threads;
 
@@ -263,8 +265,6 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
 
                 TIMEIT(lck.lock());
                 job_queue.pop_front();
-
-                jobs_started++;
                 lck.unlock();
                 // PRINT("jobs: " << jobs_finished << "/" << jobs_started);
                 break;
@@ -302,7 +302,7 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
             delete job;
         }
 
-        if ((jobs_started > 0) && (jobs_finished == jobs_started)) {
+        if ((jobs_started > 0) && (jobs_started == jobs_finished)) {
             TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
             if ((runner_state.sub_jobs.size() == 0)
                 && !runner_state.resolve_has_items()

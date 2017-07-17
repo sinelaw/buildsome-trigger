@@ -24,11 +24,16 @@ extern "C" {
 
 extern std::mutex debug_lock;
 
-//#define PRINT_DEBUG
+#define PRINT_DEBUG
 #ifdef PRINT_DEBUG
 
+#define PRINT(x) do {                                                   \
+        std::unique_lock<std::mutex> lck (debug_lock);                  \
+        std::cerr << x << std::endl;                                    \
+    } while (0)
+
 #define DEBUG(x) do {                                                   \
-        /* std::unique_lock<std::mutex> lck (debug_lock);                  \ */ \
+        std::unique_lock<std::mutex> lck (debug_lock);                  \
         if ((1)) {                                                      \
             auto now_1 = std::chrono::system_clock::now();              \
             auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(now_1.time_since_epoch()); \

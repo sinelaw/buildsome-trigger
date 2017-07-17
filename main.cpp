@@ -12,14 +12,16 @@
 #include <condition_variable>
 #include <mutex>
 
+#define UNUSED_ATTR __attribute__((unused))
+
 class ResolveRequest {
 public:
     const std::string target;
-    const std::function<void(const Optional<BuildRule> &)> *const cb;
+    const std::function<void(std::string, const Optional<BuildRule> &)> *const cb;
 
     explicit ResolveRequest(std::string t)
         : target(t), cb(nullptr) { }
-    ResolveRequest(std::string t, const std::function<void(const Optional<BuildRule> &)> *f)
+    ResolveRequest(std::string t, const std::function<void(std::string, const Optional<BuildRule> &)> *f)
         : target(t), cb(f) { }
 };
 
@@ -36,7 +38,7 @@ public:
     std::mutex mtx;
 
     void resolve_enqueue(std::string target,
-                         std::function<void(const Optional<BuildRule> &)> *cb) {
+                         const std::function<void(std::string, const Optional<BuildRule> &)> *cb) {
         TIMEIT(std::unique_lock<std::mutex> lck (this->resolve_mtx));
         this->resolve_queue.push_back(ResolveRequest(target, cb));
     }
@@ -55,6 +57,16 @@ public:
     }
 };
 
+static void sub_resolve_done(std::string input UNUSED_ATTR, const Optional<BuildRule> &sub_orule UNUSED_ATTR)
+{
+    // if (!sub_orule.has_value()) {
+    //     std::cerr << "ERROR: explicit input has no build rule: '" << input << "'" << std::endl;
+    //     exit(1);
+    // }
+}
+
+const std::function<void(std::string, const Optional<BuildRule> &)> sub_resolve_done_fn(sub_resolve_done);
+
 void resolve_all(BuildRules &build_rules,
                  RunnerState &runner_state,
                  const ResolveRequest &req,
@@ -66,7 +78,7 @@ void resolve_all(BuildRules &build_rules,
         if (cached != rules_cache.end()) {
             auto found_rule = cached->second;
             DEBUG("(cached) Invoking callback on: " << (found_rule.has_value() ? found_rule.get_value().to_string() : "<none>"));
-            if (req.cb) (*req.cb)(found_rule);
+            if (req.cb) (*req.cb)(req.target, found_rule);
             return;
         }
     }
@@ -77,15 +89,16 @@ void resolve_all(BuildRules &build_rules,
     if (orule.has_value()) {
         const BuildRule &rule = orule.get_value();
         for (auto input : rule.inputs) {
-            runner_state.resolve_enqueue(input, nullptr);
+            runner_state.resolve_enqueue(input, &sub_resolve_done_fn);
         }
         rules.push_back(rule);
     }
     DEBUG("Invoking callback on: " << (orule.has_value() ? orule.get_value().to_string() : "<none>"));
-    if (req.cb) (*req.cb)(orule);
+    if (req.cb) (*req.cb)(req.target, orule);
 }
 
 static void done_handler(RunnerState *runner_state, std::function<void(void)> done,
+                         std::string input,
                          const Optional<BuildRule> &rule);
 
 static void run_job(const BuildRule &rule,
@@ -109,8 +122,8 @@ static void run_job(const BuildRule &rule,
 
     auto resolve_cb = [rule, &runner_state](std::string input, std::function<void(void)> done) {
         DEBUG("resolve cb: " << input);
-        auto f = new std::function<void(const Optional<BuildRule> &)>(
-            std::bind(&done_handler, &runner_state, done,  std::placeholders::_1));
+        auto f = new std::function<void(std::string, const Optional<BuildRule> &)>(
+            std::bind(&done_handler, &runner_state, done, std::placeholders::_1, std::placeholders::_2));
         runner_state.resolve_enqueue(input, f);
     };
 
@@ -134,6 +147,7 @@ static void run_job(const BuildRule &rule,
 
 
 static void done_handler(RunnerState *runner_state, std::function<void(void)> done,
+                         std::string input UNUSED_ATTR,
                          const Optional<BuildRule> &rule)
 {
     // DEBUG("done resolve cb: " << input);
@@ -160,9 +174,11 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
     std::vector<std::string> missing_rules;
     for (auto target : targets) {
         DEBUG("Enqueing: " << target);
-        std::function<void(const Optional<BuildRule> &)> handler = [&target, &missing_rules](const Optional<BuildRule> &rule){
+        std::function<void(std::string, const Optional<BuildRule> &)> handler =
+            [&missing_rules]
+            (std::string input, const Optional<BuildRule> &rule){
             if (!rule.has_value()) {
-                missing_rules.push_back(target);
+                missing_rules.push_back(input);
             }
         };
         resolve_all(build_rules, runner_state,
@@ -172,7 +188,7 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
 
     if (missing_rules.size() > 0) {
         for (auto m : missing_rules) {
-            std::cerr << "Failed to resolve: " << m << std::endl;
+            PRINT("Failed to resolve: " << m);
         }
         exit(1);
     }
@@ -247,7 +263,7 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
                 lck.unlock();
 
                 jobs_started++;
-                // std::cerr << "jobs: " << jobs_finished << "/" << jobs_started << std::endl;
+                // PRINT("jobs: " << jobs_finished << "/" << jobs_started);
                 break;
             }
         }
@@ -271,8 +287,7 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
             runner_state.done_jobs.pop_front();
             jobs_finished++;
             DEBUG("jobs: " << jobs_finished << "/" << jobs_started);
-            std::cerr << jobs_finished << "/" << jobs_started << "\t" << job->get_rule().outputs.front()
-                      << std::endl;
+            PRINT(jobs_finished << "/" << jobs_started << "\t" << job->get_rule().outputs.front());
             delete job;
         }
 
@@ -304,7 +319,7 @@ int main(int argc, char **argv)
 {
     ASSERT(argc >= 0);
     if (argc < 3) {
-        std::cerr << "Usage: " << argv[0] << " <query program> <target>" << std::endl;
+        PRINT("Usage: " << argv[0] << " <query program> <target>");
         return 1;
     }
 

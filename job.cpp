@@ -410,13 +410,17 @@ void Job::want(std::string input)
                              [&](){
                                  mtx.unlock();
                              });
+    std::cerr << "[STOP ] " << this->m_rule.outputs.front() << " waiting for: " << input << std::endl;
     mtx.lock();
+    std::cerr << "[CONT ] " << this->m_rule.outputs.front() << " waiting for: " << input << " [DONE]" << std::endl;
 }
 
 uint32_t global_child_idx = 0;
 
 void Job::execute()
 {
+    std::cerr << "[START] " << this->m_rule.outputs.front() << std::endl;
+
     const uint32_t child_idx = global_child_idx;
     global_child_idx++;
 
@@ -528,5 +532,6 @@ void Job::execute()
     LOG("Child terminated: " << child);
     close(sock_fd);
 
+    std::cerr << "[DONE ] " << this->m_rule.outputs.front() << std::endl;
     // std::cerr << "Build: '" << target_ctx->path << "' - Done" << std::endl;
 }

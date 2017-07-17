@@ -226,7 +226,11 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
                     jobs_started++;
                     lck.unlock();
 
-                    run_job(th.o_rule.get_value(), runner_state);
+                    if (!run_job(th.o_rule.get_value(), runner_state)) {
+                        lck.lock();
+                        jobs_started--;
+                        lck.unlock();
+                    }
                     th.o_rule = Optional<BuildRule>();
                 }
                 th.shutting_down = true;

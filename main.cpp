@@ -29,6 +29,7 @@ private:
     std::mutex resolve_mtx;
 
 public:
+    std::deque<BuildRule> job_queue;
     std::map<std::string, Optional<BuildRule>> rules_cache;
     std::deque<std::pair<BuildRule, std::function<void(void)> > > sub_jobs;
     std::map<BuildRule, Job*> active_jobs;
@@ -37,6 +38,16 @@ public:
     std::mutex mtx;
     uint64_t jobs_started = 0;
     uint64_t jobs_finished = 0;
+
+    bool has_work() {
+        TIMEIT(std::unique_lock<std::mutex> lck (this->mtx));
+        return (this->jobs_started > this->jobs_finished)
+            || this->resolve_has_items()
+            || (this->sub_jobs.size() > 0)
+            || (this->active_jobs.size() > 0)
+            || (this->done_jobs.size() > 0)
+            || (this->job_queue.size() > 0);
+    }
 
     void resolve_enqueue(std::string target,
                          const std::function<void(std::string, const Optional<BuildRule> &)> *cb) {
@@ -82,21 +93,25 @@ const std::function<void(std::string, const Optional<BuildRule> &)> sub_resolve_
 
 void resolve_all(BuildRules &build_rules,
                  RunnerState &runner_state,
-                 const ResolveRequest &req,
-                 std::deque<BuildRule> &rules)
+                 const ResolveRequest &req)
 {
     if (runner_state.resolve_lookup_cache(req)) return;
     DEBUG("Resolving: " << req.target);
     const Optional<BuildRule> orule = build_rules.query(req.target);
-    runner_state.rules_cache[req.target] = orule;
     DEBUG("Done Resolving: " << req.target);
-    if (orule.has_value()) {
-        const BuildRule &rule = orule.get_value();
-        for (auto input : rule.inputs) {
-            runner_state.resolve_enqueue(input, &sub_resolve_done_fn);
+
+    {
+        TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
+        runner_state.rules_cache[req.target] = orule;
+        if (orule.has_value()) {
+            const BuildRule &rule = orule.get_value();
+            for (auto input : rule.inputs) {
+                runner_state.resolve_enqueue(input, &sub_resolve_done_fn);
+            }
+            runner_state.job_queue.push_back(rule);
         }
-        rules.push_back(rule);
     }
+
     DEBUG("Invoking callback on: " << (orule.has_value() ? orule.get_value().to_string() : "<none>"));
     if (req.cb) (*req.cb)(req.target, orule);
 }
@@ -176,7 +191,6 @@ constexpr const uint32_t max_concurrent_jobs = 4;
 void build(BuildRules &build_rules, const std::vector<std::string> &targets)
 {
     RunnerState runner_state;
-    std::deque<BuildRule> job_queue;
 
     std::vector<std::string> missing_rules;
     for (auto target : targets) {
@@ -188,8 +202,7 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
                 missing_rules.push_back(input);
             }
         };
-        resolve_all(build_rules, runner_state,
-                    ResolveRequest(target, &handler), job_queue);
+        resolve_all(build_rules, runner_state, ResolveRequest(target, &handler));
     }
 
     if (missing_rules.size() > 0) {
@@ -213,7 +226,7 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
     for (auto &th : runners) {
         th.o_rule = Optional<BuildRule>();
         th.shutting_down = false;
-        th.thread = new std::thread([&th, &shutdown, &runner_state, &job_queue]() {
+        th.thread = new std::thread([&th, &shutdown, &runner_state]() {
                 while (!shutdown) {
                     TIMEIT(std::unique_lock<std::mutex> lck(th.mutex));
                     while (!th.o_rule.has_value()) {
@@ -232,12 +245,12 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
             });
     }
 
-    std::thread resolve_th([&build_rules, &shutdown, &runner_state, &job_queue]() {
+    std::thread resolve_th([&build_rules, &shutdown, &runner_state]() {
             while (!shutdown) {
                 while (true) {
                     auto req = runner_state.resolve_dequeue();
                     if (!req.has_value()) break;
-                    resolve_all(build_rules, runner_state, req.get_value(), job_queue);
+                    resolve_all(build_rules, runner_state, req.get_value());
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
@@ -251,9 +264,9 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
         while (true)
         {
             TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
-            if (job_queue.size() == 0) break;
+            if (runner_state.job_queue.size() == 0) break;
             if (runner_state.active_jobs.size() >= max_concurrent_jobs) break;
-            auto rule = job_queue.front();
+            auto rule = runner_state.job_queue.front();
             lck.unlock();
 
             for (auto &th : runners) {
@@ -263,7 +276,7 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
                 th.cv.notify_all();
 
                 TIMEIT(lck.lock());
-                job_queue.pop_front();
+                runner_state.job_queue.pop_front();
                 lck.unlock();
                 // PRINT("jobs: " << jobs_finished << "/" << jobs_started);
                 break;
@@ -301,14 +314,8 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
             delete job;
         }
 
-        if ((runner_state.jobs_started > 0) && (runner_state.jobs_started == runner_state.jobs_finished)) {
-            TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
-            if ((runner_state.sub_jobs.size() == 0)
-                && !runner_state.resolve_has_items()
-                && (runner_state.active_jobs.size() == 0)
-                && (runner_state.done_jobs.size() == 0)
-                && (job_queue.size() == 0))
-            {
+        if (runner_state.jobs_started > 0) {
+            if (!runner_state.has_work()) {
                 PRINT("No more work, stopping");
                 break;
             }

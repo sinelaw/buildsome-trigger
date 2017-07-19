@@ -29,8 +29,8 @@ private:
     std::mutex resolve_mtx;
 
 public:
-    std::deque<BuildRule> job_queue;
     std::map<std::string, Optional<BuildRule>> rules_cache;
+    std::deque<std::pair<BuildRule, std::function<void(void)> > > job_queue;
     std::deque<std::pair<BuildRule, std::function<void(void)> > > sub_jobs;
     std::map<BuildRule, Job*> active_jobs;
     std::deque<Job *> done_jobs;
@@ -81,16 +81,6 @@ public:
     }
 };
 
-static void sub_resolve_done(std::string input UNUSED_ATTR, const Optional<BuildRule> &sub_orule UNUSED_ATTR)
-{
-    // if (!sub_orule.has_value()) {
-    //     std::cerr << "ERROR: explicit input has no build rule: '" << input << "'" << std::endl;
-    //     exit(1);
-    // }
-}
-
-const std::function<void(std::string, const Optional<BuildRule> &)> sub_resolve_done_fn(sub_resolve_done);
-
 void resolve_all(BuildRules &build_rules,
                  RunnerState &runner_state,
                  const ResolveRequest &req)
@@ -103,17 +93,48 @@ void resolve_all(BuildRules &build_rules,
     {
         TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
         runner_state.rules_cache[req.target] = orule;
-        if (orule.has_value()) {
-            const BuildRule &rule = orule.get_value();
-            for (auto input : rule.inputs) {
-                runner_state.resolve_enqueue(input, &sub_resolve_done_fn);
-            }
-            runner_state.job_queue.push_back(rule);
-        }
     }
+    if (!orule.has_value()) {
+        // No rule
+        DEBUG("Invoking callback on: " << (orule.has_value() ? orule.get_value().to_string() : "<none>"));
+        if (req.cb) (*req.cb)(req.target, orule);
+    }
+    const BuildRule &rule = orule.get_value();
+    if (rule.inputs.size() > 0) {
+        uint32_t count = rule.inputs.size();
+        struct RuleInfo {
+            uint32_t count = count;
+            Optional<BuildRule> orule = orule;
+            ResolveRequest req = req;
+            std::mutex count_mutex;
+        } *rule_info = new RuleInfo;
 
-    DEBUG("Invoking callback on: " << (orule.has_value() ? orule.get_value().to_string() : "<none>"));
-    if (req.cb) (*req.cb)(req.target, orule);
+        auto sub_resolve_cb = new std::function<void(std::string, const Optional<BuildRule> &)>;
+        *sub_resolve_cb =
+            [rule_info]
+            (std::string input UNUSED_ATTR, const Optional<BuildRule> &input_orule UNUSED_ATTR){
+            std::unique_lock<std::mutex> count_lck(rule_info->count_mutex);
+            rule_info->count--;
+            if (rule_info->count == 0) {
+                count_lck.unlock();
+                DEBUG("Invoking callback on: " << rule_info->orule.get_value().to_string());
+                if (rule_info->req.cb) (*rule_info->req.cb)(rule_info->req.target, rule_info->orule);
+                delete rule_info;
+            }
+        };
+        for (auto input : rule.inputs) {
+            runner_state.resolve_enqueue(input, sub_resolve_cb);
+        }
+        return;
+    }
+    // have rule but no inputs
+    TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
+    std::function<void(void)> sub_job_done = [req](){
+        DEBUG("Invoking callback on: " << orule.get_value().to_string());
+        if (req.cb) (*req.cb)(req.target, orule);
+    };
+    runner_state.job_queue.push_back(
+        std::pair<BuildRule, std::function<void(void)> >(rule, sub_job_done));
 }
 
 static void done_handler(RunnerState *runner_state, std::function<void(void)> done,

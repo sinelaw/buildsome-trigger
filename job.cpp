@@ -185,8 +185,8 @@ static bool wait_for(pid_t child, const std::string &cmd __attribute__((unused))
     }
     ASSERT(wait_child == child);
     if (WEXITSTATUS(wait_res) != 0) {
-        DEBUG("BUILD FAILED: Child process " << child << " exited with status: " << WEXITSTATUS(wait_res));
-        DEBUG("BUILD FAILED: Failing command: " << cmd);
+        PRINT("BUILD FAILED: Child process " << child << " exited with status: " << WEXITSTATUS(wait_res));
+        PRINT("BUILD FAILED: Failing command: " << cmd);
         exit(1);
     }
     return true;

@@ -42,6 +42,7 @@ public:
     std::deque< std::pair<BuildRule, ResolveCB * > > job_queue;
     std::deque< std::pair<BuildRule, ResolveCB * > > sub_jobs;
     std::map<BuildRule, Job*> active_jobs;
+    std::map<BuildRule, std::vector<ResolveCB *> *> pending_cbs;
     std::deque<Job *> done_jobs;
     std::map<BuildRule, Outcome> outcomes;
     std::mutex mtx;
@@ -61,7 +62,6 @@ public:
     void resolve_enqueue(std::string target,
                          const std::function<void(std::string, const Optional<BuildRule> &)> *cb) {
         const ResolveRequest req(target, cb);
-        if (this->resolve_lookup_cache(req).has_value()) return;
         TIMEIT(std::unique_lock<std::mutex> lck (this->resolve_mtx));
         this->resolve_queue.push_back(req);
     }
@@ -100,6 +100,8 @@ void resolve_all(BuildRules &build_rules,
         auto cur = pending_resolves.front();
         pending_resolves.pop_front();
 
+        DEBUG("Trying to resolve: " << cur.target);
+
         if (pending.find(cur.target) != pending.end()) {
             PRINT("Cyclic dependency on " << cur.target);
             abort();
@@ -107,9 +109,31 @@ void resolve_all(BuildRules &build_rules,
 
         auto result = runner_state.resolve_lookup_cache(cur);
         if (result.has_value()) {
+            if (!cur.cb) continue;
             auto orule = result.get_value().result;
-            DEBUG("Found in cache: '" << cur.target << "', invoking callback on: " << (orule.has_value() ? orule.get_value().to_string() : "<none>"));
-            if (cur.cb) (*cur.cb)(cur.target, orule);
+            if (!orule.has_value()) {
+                DEBUG("Found in cache: '" << cur.target << "', invoking callback on: " << (orule.has_value() ? orule.get_value().to_string() : "<none>"));
+                if (cur.cb) (*cur.cb)(cur.target, orule);
+                continue;
+            }
+            auto rule = orule.get_value();
+            TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
+            auto outcome = runner_state.outcomes.find(rule);
+            if (outcome != runner_state.outcomes.end()) {
+                DEBUG("Found in cache: '" << cur.target << "', invoking callback on: " << rule.to_string()) ;
+                if (cur.cb) (*cur.cb)(cur.target, orule);
+                continue;
+            }
+
+            // TODO: register the cb to be run when this job is done.
+            auto cbs = runner_state.pending_cbs.find(rule);
+            if (cbs != runner_state.pending_cbs.end()) {
+                cbs->second->push_back(cur.cb);
+            } else {
+                auto new_cbs = new std::vector<ResolveCB*>();
+                new_cbs->push_back(cur.cb);
+                runner_state.pending_cbs[rule] = new_cbs;
+            }
             continue;
         }
 
@@ -195,6 +219,16 @@ static bool run_job(const BuildRule &rule,
     ASSERT(1 == erased_count);
     DEBUG("Done job: " << found_job->second);
     runner_state.outcomes[rule] = Outcome();
+
+    auto cbs = runner_state.pending_cbs.find(rule);
+    if (cbs != runner_state.pending_cbs.end()) {
+        for (auto cb : (*cbs->second)) {
+            (*cb)(rule.outputs.front(), Optional<BuildRule>(rule));
+        }
+        delete cbs->second;
+        runner_state.pending_cbs.erase(rule);
+    }
+
     return true;
 }
 

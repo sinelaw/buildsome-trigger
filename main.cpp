@@ -162,9 +162,31 @@ void resolve_all(BuildRules &build_rules,
 
         pending.erase(cur.target);
     }
+
+    if (!top_req.cb) {
+        for (auto cur : done_resolves) {
+            DEBUG("Queueing job '" << cur.first.outputs.front() << "' cb: " << cur.second);
+            runner_state.job_queue.push_back(cur);
+        }
+        return;
+    }
+
+    auto result = runner_state.resolve_lookup_cache(top_req);
+    ASSERT(result.has_value());
+    Optional<BuildRule> top_orule = result.get_value().result;
+    uint32_t *const inputs_remaining = new uint32_t(done_resolves.size());
     for (auto cur : done_resolves) {
+        ResolveCB *const final_cb = new ResolveCB(
+            [cur, top_req, inputs_remaining, top_orule]
+            (std::string target, const Optional<BuildRule> &cur_orule){
+                if (cur.second) (*cur.second)(target, cur_orule);
+                (*inputs_remaining)--;
+                if ((*inputs_remaining) == 0) {
+                    (*top_req.cb)(top_req.target, top_orule);
+                }
+            });
         DEBUG("Queueing job '" << cur.first.outputs.front() << "' cb: " << cur.second);
-        runner_state.job_queue.push_back(cur);
+        runner_state.job_queue.push_back(std::pair<BuildRule, ResolveCB *>(cur.first, final_cb));
     }
 }
 

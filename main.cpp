@@ -89,11 +89,11 @@ public:
 
 void resolve_all(BuildRules &build_rules,
                  RunnerState &runner_state,
-                 const ResolveRequest &req)
+                 const ResolveRequest &top_req)
 {
     std::set<std::string> pending;
     std::deque<ResolveRequest> pending_resolves;
-    pending_resolves.push_back(req);
+    pending_resolves.push_back(top_req);
     std::deque< std::pair<BuildRule, ResolveCB * > > done_resolves;
 
     while (pending_resolves.size() > 0) {
@@ -106,7 +106,12 @@ void resolve_all(BuildRules &build_rules,
         }
 
         auto result = runner_state.resolve_lookup_cache(cur);
-        if (result.has_value()) continue;
+        if (result.has_value()) {
+            auto orule = result.get_value().result;
+            DEBUG("Found in cache: '" << cur.target << "', invoking callback on: " << (orule.has_value() ? orule.get_value().to_string() : "<none>"));
+            if (cur.cb) (*cur.cb)(cur.target, orule);
+            continue;
+        }
 
         pending.insert(cur.target);
 
@@ -116,13 +121,13 @@ void resolve_all(BuildRules &build_rules,
 
         {
             TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
-            runner_state.rules_cache[req.target] = orule;
+            runner_state.rules_cache[cur.target] = orule;
         }
 
         if (!orule.has_value()) {
             // No rule, no job to run
             DEBUG("Invoking callback on: " << (orule.has_value() ? orule.get_value().to_string() : "<none>"));
-            if (req.cb) (*req.cb)(req.target, orule);
+            if (cur.cb) (*cur.cb)(cur.target, orule);
         } else {
             const BuildRule &rule = orule.get_value();
             for (auto input : rule.inputs) {

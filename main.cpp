@@ -416,6 +416,15 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
             delete job;
         }
 
+        while (true) {
+            TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
+            auto &th = runner_state.pending_threads.front();
+            runner_state.pending_threads.pop_front();
+            lck.unlock();
+            th->join();
+            delete th;
+        }
+
         if (runner_state.jobs_started > 0) {
             if (!runner_state.has_work()) {
                 PRINT("No more work, stopping");

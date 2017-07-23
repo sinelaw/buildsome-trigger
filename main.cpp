@@ -173,17 +173,13 @@ static void resolve_all(BuildRules &build_rules,
     ASSERT(result.has_value());
     const Optional<BuildRule> top_orule = result.get_value().result;
 
-    if (!top_req.cb || !top_orule.has_value()) {
-        for (auto it = done_resolves->rbegin(); it != done_resolves->rend(); it++) {
-            DEBUG("Queueing job '" << it->first.outputs.front() << "' cb: " << it->second);
-            runner_state.job_queue.push_back(*it);
-        }
-        if (top_req.cb) {
-            ASSERT(!top_orule.has_value());
-            (*top_req.cb)(top_req.target, top_orule);
-        }
-        return;
+    for (auto it = done_resolves->rbegin(); it != done_resolves->rend(); it++) {
+        DEBUG("Queueing job '" << it->first.outputs.front() << "' cb: " << it->second);
+        runner_state.job_queue.push_back(*it);
     }
+
+    if (!top_orule.has_value()) return;
+
     auto top_rule = top_orule.get_value();
     DEBUG("Target " << top_rule.outputs.front() << " has " << done_resolves->size() << " dependencies");
     // for (auto cur : *done_resolves) {
@@ -326,7 +322,7 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
                             th.shutting_down = true;
                             return;
                         }
-                        if (!th.o_rule.has_value()) continue;
+                        if (th.o_rule.has_value()) break;
                     }
 
                     run_job(th.o_rule.get_value(), runner_state);
@@ -355,25 +351,32 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
     while (true)
     {
         // TODO: bg thread? or use async IO and a reactor?
-        while (true)
-        {
+        while (true) {
             TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
             if (runner_state.job_queue.size() == 0) break;
             if (runner_state.active_jobs.size() >= max_concurrent_jobs) break;
             auto rule_cb_pair = runner_state.job_queue.front();
             lck.unlock();
+            DEBUG("Looking for worker, for job: " << rule_cb_pair.first.outputs.front());
 
             for (auto &th : runners) {
                 TIMEIT(std::unique_lock<std::mutex> th_lck(th.mutex));
-                if (th.o_rule.has_value()) continue;
+                if (th.o_rule.has_value()) {
+                    DEBUG("working is busy");
+                    continue;
+                }
                 th.o_rule = Optional<BuildRule>(rule_cb_pair.first);
                 th.cb = rule_cb_pair.second;
                 th.cv.notify_all();
+
+                TIMEIT(lck.lock());
                 runner_state.job_queue.pop_front();
                 lck.unlock();
                 // PRINT("jobs: " << jobs_finished << "/" << jobs_started);
                 break;
             }
+
+            break;
         }
 
         while (true) {

@@ -14,7 +14,7 @@ GPP=g++ -no-pie
 GCC=gcc -no-pie
 CLANGPP=clang++
 
-CXX=${GPP} -g ${WARNINGS} -std=c++11 -pthread  -msse4.2
+CXX=${GPP} -g  -g3 -fno-inline -O0 ${WARNINGS} -std=c++11 -pthread  -msse4.2
 CC=${GCC} -g ${WARNINGS} -std=gnu11
 
 

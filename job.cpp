@@ -165,9 +165,9 @@ static void debug_req(enum func func_id, bool delayed, uint32_t str_size)
     default: PANIC("Invalid func_id: " << func_id);
     }
 
-    LOG("recv: delayed=" << (delayed ? "yes" : "no")
-        << " name: " << name
-        << " size: " << str_size);
+    // LOG("recv: delayed=" << (delayed ? "yes" : "no")
+    //     << " name: " << name
+    //     << " size: " << str_size);
     (void)name;
     (void)delayed;
     (void)str_size;
@@ -197,7 +197,7 @@ static __thread uint64_t connections_accepted = 0;
 static void get_input_paths(enum func func_id, const char *buf, uint32_t buf_size,
                             struct OperationPaths *out_paths)
 {
-    LOG("func_id: " << func_id);
+    // LOG("func_id: " << func_id);
     out_paths->input_count = 0;
     out_paths->output_count = 0;
     switch (func_id) {
@@ -411,7 +411,8 @@ void Job::want(std::string input)
     std::mutex mtx;
     mtx.lock();
     this->m_resolve_input_cb(input,
-                             [&](){
+                             [&mtx, input](){
+                                 DEBUG("[UNLOC] " << input);
                                  mtx.unlock();
                              });
     DEBUG("[STOP ] " << this->m_rule.outputs.front() << " waiting for: " << input);
@@ -473,7 +474,7 @@ void Job::execute()
     stringStream << "/tmp/trigger.sock." << getpid() << "." << child_idx;
     const std::string sockAddr = stringStream.str();
 
-    LOG("Forking child: " << cmd);
+    PRINT("Forking child: " << cmd);
     // PRINT("Build: '" << target_ctx->path << "'");
 
     int parent_child_pipe[2];

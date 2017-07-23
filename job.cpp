@@ -186,7 +186,9 @@ static bool wait_for(pid_t child, const std::string &cmd __attribute__((unused))
     ASSERT(wait_child == child);
     if (!WIFEXITED(wait_res) || (WEXITSTATUS(wait_res) != 0)) {
         PRINT("BUILD FAILED: Failing command: " << cmd);
-        PANIC("BUILD FAILED: Child process " << child << " exited with status: " << WEXITSTATUS(wait_res));
+        PANIC("BUILD FAILED: Child process " << child
+              << " exited " << (WIFEXITED(wait_res) ? "normally" : "abnormally")
+              << " (exit status: " << WEXITSTATUS(wait_res) << ")");
     }
     return true;
 }

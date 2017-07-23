@@ -281,6 +281,7 @@ static bool run_job(const BuildRule &rule,
         lck.unlock();
         for (auto cb : *cbs_list) {
             (*cb)(rule.outputs.front(), Optional<BuildRule>(rule));
+            delete cb;
         }
         delete cbs_list;
         lck.lock();
@@ -347,10 +348,6 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
                     }
 
                     run_job(th.o_rule.get_value(), runner_state);
-                    if (th.cb) {
-                        DEBUG("Running cb: " << th.cb);
-                        (*th.cb)(th.o_rule.get_value().outputs.front(), th.o_rule);
-                    }
                     th.o_rule = Optional<BuildRule>();
                     th.cb = nullptr;
                 }

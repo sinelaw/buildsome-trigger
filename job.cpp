@@ -184,10 +184,9 @@ static bool wait_for(pid_t child, const std::string &cmd __attribute__((unused))
         return false;
     }
     ASSERT(wait_child == child);
-    if (WEXITSTATUS(wait_res) != 0) {
-        PRINT("BUILD FAILED: Child process " << child << " exited with status: " << WEXITSTATUS(wait_res));
+    if (!WIFEXITED(wait_res) || (WEXITSTATUS(wait_res) != 0)) {
         PRINT("BUILD FAILED: Failing command: " << cmd);
-        exit(1);
+        PANIC("BUILD FAILED: Child process " << child << " exited with status: " << WEXITSTATUS(wait_res));
     }
     return true;
 }
@@ -521,7 +520,7 @@ void Job::execute()
         close(parent_child_pipe[0]);
         const char *const args[] = { SHELL_EXE_PATH, "-ec", cmd.c_str(), NULL };
         execvpe("/bin/sh", (char *const*)args, (char *const*)envir);
-        PANIC("exec failed?!");
+        PANIC("exec failed: " << cmd);
     }
 
     close(parent_child_pipe[0]);

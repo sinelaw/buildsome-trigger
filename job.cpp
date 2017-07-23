@@ -457,7 +457,7 @@ void Job::execute()
     for (auto output : m_rule.outputs) {
         struct stat output_file_stat;
         if (0 == stat(output.c_str(), &output_file_stat)) {
-            PRINT("[REMOV] " << output);
+            DEBUG("[REMOV] " << output);
             if (output_file_stat.st_mode & S_IFDIR) {
                 remove_dir_recursively(output.c_str());
             } else {

@@ -154,7 +154,7 @@ static void resolve_all(BuildRules &build_rules,
 
         if (!orule.has_value()) {
             // No rule, no job to run
-            DEBUG("Invoking callback " << cur.cb << " on: " << (orule.has_value() ? orule.get_value().to_string() : "<none>"));
+            DEBUG("Invoking callback " << cur.cb << " on: <no rule>, " << cur.target);
             if (cur.cb) (*cur.cb)(cur.target, orule);
             DEBUG("Callback returned: " << cur.cb);
         } else {
@@ -162,30 +162,41 @@ static void resolve_all(BuildRules &build_rules,
             for (auto input : rule.inputs) {
                 pending_resolves.push_back(ResolveRequest(input, nullptr));
             }
+            DEBUG("Target " << top_req.target << " adding dependency: " << cur.target);
             done_resolves->push_front(std::pair<BuildRule, ResolveCB * >(orule.get_value(), cur.cb));
         }
 
         pending.erase(cur.target);
     }
 
-    if (!top_req.cb) {
-        for (auto it = done_resolves->rbegin(); it != done_resolves->rend(); it++) {
-            DEBUG("Queueing job '" << it->first.outputs.front() << "' cb: " << it->second);
-            runner_state.job_queue.push_back(*it);
-        }
-        return;
-    }
-
     auto result = runner_state.resolve_lookup_cache(top_req);
     ASSERT(result.has_value());
     const Optional<BuildRule> top_orule = result.get_value().result;
 
-    std::thread *sub_job = new std::thread([&runner_state, done_resolves, top_orule](){
-            for (auto it = done_resolves->rbegin(); it != done_resolves->rend(); it++) {
-                run_job(it->first, runner_state);
-                if (it->second) {
-                    DEBUG("Running cb: " << it->second);
-                    (*it->second)(it->first.outputs.front(), Optional<BuildRule>(it->first));
+    if (!top_req.cb || !top_orule.has_value()) {
+        for (auto it = done_resolves->rbegin(); it != done_resolves->rend(); it++) {
+            DEBUG("Queueing job '" << it->first.outputs.front() << "' cb: " << it->second);
+            runner_state.job_queue.push_back(*it);
+        }
+        if (top_req.cb) {
+            ASSERT(!top_orule.has_value());
+            (*top_req.cb)(top_req.target, top_orule);
+        }
+        return;
+    }
+    auto top_rule = top_orule.get_value();
+    DEBUG("Target " << top_rule.outputs.front() << " has " << done_resolves->size() << " dependencies");
+    // for (auto cur : *done_resolves) {
+    //     DEBUG(top_rule.outputs.front() << " --> " << cur.first.outputs.front());
+    // }
+    std::thread *const sub_job = new std::thread([&runner_state, done_resolves, top_rule](){
+            for (auto &cur : *done_resolves) {
+                DEBUG("For " << top_rule.outputs.front()
+                      << ", running dependency " << cur.first.outputs.front()
+                      << " cb: " << cur.second);
+                run_job(cur.first, runner_state);
+                if (cur.second) {
+                    (*cur.second)(cur.first.outputs.front(), Optional<BuildRule>(cur.first));
                 }
             }
             delete done_resolves;

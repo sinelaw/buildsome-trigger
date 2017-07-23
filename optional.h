@@ -30,9 +30,8 @@ public:
 
     Optional& operator=(const Optional &other) {
         //DEBUG("Assigning: " << &other << "->" << this);
-        if (m_has_value && other.m_has_value) {
-            *this->value = *other.value;
-            return *this;
+        if (m_has_value) {
+            delete this->value;
         }
         if (other.m_has_value) {
             this->value = new T(*other.value);

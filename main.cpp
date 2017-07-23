@@ -109,27 +109,29 @@ static void resolve_all(BuildRules &build_rules,
             abort();
         }
 
+        TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
         auto result = runner_state.resolve_lookup_cache(cur);
         if (result.has_value()) {
             if (!cur.cb) continue;
             auto orule = result.get_value().result;
             if (!orule.has_value()) {
+                lck.unlock();
                 DEBUG("Found in cache (no rule): '" << cur.target << "', invoking callback on: " << (orule.has_value() ? orule.get_value().to_string() : "<none>"));
                 if (cur.cb) (*cur.cb)(cur.target, orule);
                 DEBUG("Callback returned: " << cur.cb);
                 continue;
             }
             auto rule = orule.get_value();
-            TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
             auto outcome = runner_state.outcomes.find(rule);
             if (outcome != runner_state.outcomes.end()) {
+                lck.unlock();
                 DEBUG("Already finished: '" << cur.target << "', invoking callback on: " << rule.to_string()) ;
                 if (cur.cb) (*cur.cb)(cur.target, orule);
                 DEBUG("Callback returned: " << cur.cb);
                 continue;
             }
 
-            // TODO: register the cb to be run when this job is done.
+            // register the cb to be run when this job is done.
             auto cbs = runner_state.pending_cbs.find(rule);
             if (cbs != runner_state.pending_cbs.end()) {
                 cbs->second->push_back(cur.cb);
@@ -141,30 +143,46 @@ static void resolve_all(BuildRules &build_rules,
             continue;
         }
 
-        pending.insert(cur.target);
+        lck.unlock();
 
+        pending.insert(cur.target);
         DEBUG("Resolving: " << cur.target);
         const Optional<BuildRule> orule = build_rules.query(cur.target);
         DEBUG("Done Resolving: " << cur.target);
 
-        {
-            TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
-            runner_state.rules_cache[cur.target] = orule;
-        }
+        lck.lock();
 
+        runner_state.rules_cache[cur.target] = orule;
         if (!orule.has_value()) {
             // No rule, no job to run
             DEBUG("Invoking callback " << cur.cb << " on: <no rule>, " << cur.target);
+            lck.unlock();
             if (cur.cb) (*cur.cb)(cur.target, orule);
+            lck.lock();
             DEBUG("Callback returned: " << cur.cb);
         } else {
             const BuildRule &rule = orule.get_value();
+
+            if (cur.cb) {
+                // register the cb to be run when this job is done.
+                auto cbs = runner_state.pending_cbs.find(rule);
+                if (cbs != runner_state.pending_cbs.end()) {
+                    cbs->second->push_back(cur.cb);
+                } else {
+                    auto new_cbs = new std::vector<ResolveCB*>();
+                    new_cbs->push_back(cur.cb);
+                    runner_state.pending_cbs[rule] = new_cbs;
+                }
+            }
+
             for (auto input : rule.inputs) {
                 pending_resolves.push_back(ResolveRequest(input, nullptr));
             }
             DEBUG("Target " << top_req.target << " adding dependency: " << cur.target);
             done_resolves->push_front(std::pair<BuildRule, ResolveCB * >(orule.get_value(), cur.cb));
         }
+
+        lck.unlock();
 
         pending.erase(cur.target);
     }
@@ -191,9 +209,6 @@ static void resolve_all(BuildRules &build_rules,
                       << ", running dependency " << cur.first.outputs.front()
                       << " cb: " << cur.second);
                 run_job(cur.first, runner_state);
-                if (cur.second) {
-                    (*cur.second)(cur.first.outputs.front(), Optional<BuildRule>(cur.first));
-                }
             }
             delete done_resolves;
         });
@@ -244,8 +259,6 @@ static bool run_job(const BuildRule &rule,
     DEBUG("Done: '" << rule.to_string() << "'");
 
     TIMEIT(lck.lock());
-    DEBUG("Done job: " << job);
-    runner_state.outcomes[rule] = Outcome(); // TODO
     {
         auto found_job = runner_state.active_jobs.find(rule);
         ASSERT(found_job != runner_state.active_jobs.end());
@@ -264,7 +277,11 @@ static bool run_job(const BuildRule &rule,
             (*cb)(rule.outputs.front(), Optional<BuildRule>(rule));
         }
         delete cbs_list;
+        lck.lock();
     }
+
+    DEBUG("Done job: " << job);
+    runner_state.outcomes[rule] = Outcome(); // TODO
 
     return true;
 }
@@ -356,6 +373,14 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
             if (runner_state.job_queue.size() == 0) break;
             if (runner_state.active_jobs.size() >= max_concurrent_jobs) break;
             auto rule_cb_pair = runner_state.job_queue.front();
+
+            if ((runner_state.active_jobs.find(rule_cb_pair.first) != runner_state.active_jobs.end())
+                || (runner_state.outcomes.find(rule_cb_pair.first) != runner_state.outcomes.end()))
+            {
+                runner_state.job_queue.pop_front();
+                continue;
+            }
+
             lck.unlock();
             DEBUG("Looking for worker, for job: " << rule_cb_pair.first.outputs.front());
 

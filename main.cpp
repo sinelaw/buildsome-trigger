@@ -416,7 +416,7 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
             delete job;
         }
 
-        while (true) {
+        while (runner_state.pending_threads.size() > 0) {
             TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
             auto &th = runner_state.pending_threads.front();
             runner_state.pending_threads.pop_front();

@@ -45,6 +45,7 @@ public:
     std::deque<Job *> done_jobs;
     std::map<BuildRule, Outcome> outcomes;
     std::deque<std::thread *> pending_threads;
+    // std::deque<std::thread *> completed_threads;
     std::mutex mtx;
     uint64_t jobs_started = 0;
     uint64_t jobs_finished = 0;
@@ -206,7 +207,7 @@ static void resolve_all(BuildRules &build_rules,
     // for (auto cur : *done_resolves) {
     //     DEBUG(top_rule.outputs.front() << " --> " << cur.first.outputs.front());
     // }
-    std::thread *const sub_job = new std::thread([&runner_state, done_resolves, top_rule](){
+    std::thread *const sub_job = new std::thread([&runner_state, sub_job, done_resolves, top_rule](){
             for (auto &cur : *done_resolves) {
                 DEBUG("For " << top_rule.outputs.front()
                       << ", running dependency " << cur.first.outputs.front()
@@ -214,6 +215,8 @@ static void resolve_all(BuildRules &build_rules,
                 run_job(cur.first, runner_state);
             }
             delete done_resolves;
+            // TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
+            // runner_state.completed_threads.push_back(sub_job);
         });
     runner_state.pending_threads.push_back(sub_job);
 }
@@ -416,14 +419,15 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
             delete job;
         }
 
-        while (runner_state.pending_threads.size() > 0) {
-            TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
-            auto &th = runner_state.pending_threads.front();
-            runner_state.pending_threads.pop_front();
-            lck.unlock();
-            th->join();
-            delete th;
-        }
+        // while (true) {
+        //     TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
+        //     if (runner_state.completed_threads.size() == 0) break;
+        //     auto &th = runner_state.completed_threads.front();
+        //     runner_state.completed_threads.pop_front();
+        //     lck.unlock();
+        //     th->join();
+        //     delete th;
+        // }
 
         if (runner_state.jobs_started > 0) {
             if (!runner_state.has_work()) {

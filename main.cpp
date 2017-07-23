@@ -271,6 +271,9 @@ static bool run_job(const BuildRule &rule,
         ASSERT(1 == erased_count);
     }
 
+
+    runner_state.outcomes[rule] = Outcome(); // TODO
+
     auto cbs = runner_state.pending_cbs.find(rule);
     if (cbs != runner_state.pending_cbs.end()) {
         auto cbs_list = cbs->second;
@@ -284,8 +287,6 @@ static bool run_job(const BuildRule &rule,
     }
 
     DEBUG("Done job: " << job);
-    runner_state.outcomes[rule] = Outcome(); // TODO
-
     return true;
 }
 

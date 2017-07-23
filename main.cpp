@@ -40,11 +40,11 @@ private:
 public:
     std::map<std::string, Optional<BuildRule>> rules_cache;
     std::deque< std::pair<BuildRule, ResolveCB * > > job_queue;
-    std::deque< std::pair<BuildRule, ResolveCB * > > sub_jobs;
     std::map<BuildRule, Job*> active_jobs;
     std::map<BuildRule, std::vector<ResolveCB *> *> pending_cbs;
     std::deque<Job *> done_jobs;
     std::map<BuildRule, Outcome> outcomes;
+    std::deque<std::thread *> pending_threads;
     std::mutex mtx;
     uint64_t jobs_started = 0;
     uint64_t jobs_finished = 0;
@@ -53,7 +53,6 @@ public:
         TIMEIT(std::unique_lock<std::mutex> lck (this->mtx));
         return (this->jobs_started > this->jobs_finished)
             || this->resolve_has_items()
-            || (this->sub_jobs.size() > 0)
             || (this->active_jobs.size() > 0)
             || (this->done_jobs.size() > 0)
             || (this->job_queue.size() > 0);
@@ -87,14 +86,17 @@ public:
     }
 };
 
-void resolve_all(BuildRules &build_rules,
-                 RunnerState &runner_state,
-                 const ResolveRequest &top_req)
+static bool run_job(const BuildRule &rule,
+                    RunnerState &runner_state);
+
+static void resolve_all(BuildRules &build_rules,
+                        RunnerState &runner_state,
+                        const ResolveRequest &top_req)
 {
     std::set<std::string> pending;
     std::deque<ResolveRequest> pending_resolves;
     pending_resolves.push_back(top_req);
-    std::deque< std::pair<BuildRule, ResolveCB * > > done_resolves;
+    auto done_resolves = new std::deque< std::pair<BuildRule, ResolveCB * > >();
 
     while (pending_resolves.size() > 0) {
         auto cur = pending_resolves.front();
@@ -112,16 +114,18 @@ void resolve_all(BuildRules &build_rules,
             if (!cur.cb) continue;
             auto orule = result.get_value().result;
             if (!orule.has_value()) {
-                DEBUG("Found in cache: '" << cur.target << "', invoking callback on: " << (orule.has_value() ? orule.get_value().to_string() : "<none>"));
+                DEBUG("Found in cache (no rule): '" << cur.target << "', invoking callback on: " << (orule.has_value() ? orule.get_value().to_string() : "<none>"));
                 if (cur.cb) (*cur.cb)(cur.target, orule);
+                DEBUG("Callback returned: " << cur.cb);
                 continue;
             }
             auto rule = orule.get_value();
             TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
             auto outcome = runner_state.outcomes.find(rule);
             if (outcome != runner_state.outcomes.end()) {
-                DEBUG("Found in cache: '" << cur.target << "', invoking callback on: " << rule.to_string()) ;
+                DEBUG("Already finished: '" << cur.target << "', invoking callback on: " << rule.to_string()) ;
                 if (cur.cb) (*cur.cb)(cur.target, orule);
+                DEBUG("Callback returned: " << cur.cb);
                 continue;
             }
 
@@ -150,44 +154,43 @@ void resolve_all(BuildRules &build_rules,
 
         if (!orule.has_value()) {
             // No rule, no job to run
-            DEBUG("Invoking callback on: " << (orule.has_value() ? orule.get_value().to_string() : "<none>"));
+            DEBUG("Invoking callback " << cur.cb << " on: " << (orule.has_value() ? orule.get_value().to_string() : "<none>"));
             if (cur.cb) (*cur.cb)(cur.target, orule);
+            DEBUG("Callback returned: " << cur.cb);
         } else {
             const BuildRule &rule = orule.get_value();
             for (auto input : rule.inputs) {
                 pending_resolves.push_back(ResolveRequest(input, nullptr));
             }
-            done_resolves.push_front(std::pair<BuildRule, ResolveCB * >(orule.get_value(), cur.cb));
+            done_resolves->push_front(std::pair<BuildRule, ResolveCB * >(orule.get_value(), cur.cb));
         }
 
         pending.erase(cur.target);
     }
 
     if (!top_req.cb) {
-        for (auto cur : done_resolves) {
-            DEBUG("Queueing job '" << cur.first.outputs.front() << "' cb: " << cur.second);
-            runner_state.job_queue.push_back(cur);
+        for (auto it = done_resolves->rbegin(); it != done_resolves->rend(); it++) {
+            DEBUG("Queueing job '" << it->first.outputs.front() << "' cb: " << it->second);
+            runner_state.job_queue.push_back(*it);
         }
         return;
     }
 
     auto result = runner_state.resolve_lookup_cache(top_req);
     ASSERT(result.has_value());
-    Optional<BuildRule> top_orule = result.get_value().result;
-    uint32_t *const inputs_remaining = new uint32_t(done_resolves.size());
-    for (auto cur : done_resolves) {
-        ResolveCB *const final_cb = new ResolveCB(
-            [cur, top_req, inputs_remaining, top_orule]
-            (std::string target, const Optional<BuildRule> &cur_orule){
-                if (cur.second) (*cur.second)(target, cur_orule);
-                (*inputs_remaining)--;
-                if ((*inputs_remaining) == 0) {
-                    (*top_req.cb)(top_req.target, top_orule);
+    const Optional<BuildRule> top_orule = result.get_value().result;
+
+    std::thread *sub_job = new std::thread([&runner_state, done_resolves, top_orule](){
+            for (auto it = done_resolves->rbegin(); it != done_resolves->rend(); it++) {
+                run_job(it->first, runner_state);
+                if (it->second) {
+                    DEBUG("Running cb: " << it->second);
+                    (*it->second)(it->first.outputs.front(), Optional<BuildRule>(it->first));
                 }
-            });
-        DEBUG("Queueing job '" << cur.first.outputs.front() << "' cb: " << cur.second);
-        runner_state.job_queue.push_back(std::pair<BuildRule, ResolveCB *>(cur.first, final_cb));
-    }
+            }
+            delete done_resolves;
+        });
+    runner_state.pending_threads.push_back(sub_job);
 }
 
 static void done_handler(std::function<void(void)> done,
@@ -332,8 +335,6 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
             }
         });
 
-    std::vector<std::thread *> sub_job_threads;
-
     while (true)
     {
         // TODO: bg thread? or use async IO and a reactor?
@@ -362,29 +363,6 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
 
         while (true) {
             TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
-            if (runner_state.sub_jobs.size() == 0) break;
-            auto sub_job = runner_state.sub_jobs.front();
-            runner_state.sub_jobs.pop_front();
-            lck.unlock();
-            sub_job_threads.push_back(new std::thread([sub_job, &runner_state]() {
-                        const bool ready = run_job(sub_job.first, runner_state);
-                        if (!ready) {
-                            TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
-                            while (runner_state.active_jobs.find(sub_job.first) != runner_state.active_jobs.end()) {
-                                lck.unlock();
-                                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                                lck.lock();
-                            }
-                        }
-                        if (sub_job.second) {
-                            DEBUG("Running sub-job cb: " << sub_job.second);
-                            (*sub_job.second)(sub_job.first.outputs.front(), Optional<BuildRule>(sub_job.first));
-                        }
-                    }));
-        }
-
-        while (true) {
-            TIMEIT(std::unique_lock<std::mutex> lck (runner_state.mtx));
             if (runner_state.done_jobs.size() == 0) break;
             auto job = runner_state.done_jobs.front();
             runner_state.done_jobs.pop_front();
@@ -407,10 +385,7 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
     shutdown = true;
     DEBUG("waiting for resolve thread");
     resolve_th.join();
-    for (auto th : sub_job_threads) {
-        th->join();
-        delete th;
-    }
+    DEBUG("waiting for runner threads");
     for (auto &th : runners) {
         while (!th.shutting_down) {
             TIMEIT(std::unique_lock<std::mutex> lck(th.mutex));
@@ -421,6 +396,12 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
         delete th.thread;
         th.thread = nullptr;
     }
+    DEBUG("waiting for job threads: " << runner_state.pending_threads.size());
+    for (auto &th: runner_state.pending_threads) {
+        th->join();
+        delete th;
+    }
+    PRINT("Build successful");
 }
 
 int main(int argc, char **argv)

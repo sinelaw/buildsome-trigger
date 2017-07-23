@@ -196,7 +196,10 @@ static void resolve_all(BuildRules &build_rules,
         runner_state.job_queue.push_back(*it);
     }
 
-    if (!top_orule.has_value()) return;
+    if (!top_orule.has_value()) {
+        delete done_resolves;
+        return;
+    }
 
     auto top_rule = top_orule.get_value();
     DEBUG("Target " << top_rule.outputs.front() << " has " << done_resolves->size() << " dependencies");

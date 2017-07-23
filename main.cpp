@@ -307,15 +307,16 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
         th.shutting_down = false;
         th.thread = new std::thread([&th, &shutdown, &runner_state]() {
                 while (!shutdown) {
-                    TIMEIT(std::unique_lock<std::mutex> lck(th.mutex));
-                    while (!th.o_rule.has_value()) {
+                    while (true) {
+                        TIMEIT(std::unique_lock<std::mutex> lck(th.mutex));
                         th.cv.wait(lck);
                         if (shutdown) {
+                            DEBUG("runner shutting down");
                             th.shutting_down = true;
                             return;
                         }
+                        if (!th.o_rule.has_value()) continue;
                     }
-                    lck.unlock();
 
                     run_job(th.o_rule.get_value(), runner_state);
                     if (th.cb) {
@@ -357,8 +358,6 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
                 th.o_rule = Optional<BuildRule>(rule_cb_pair.first);
                 th.cb = rule_cb_pair.second;
                 th.cv.notify_all();
-
-                TIMEIT(lck.lock());
                 runner_state.job_queue.pop_front();
                 lck.unlock();
                 // PRINT("jobs: " << jobs_finished << "/" << jobs_started);
@@ -386,6 +385,12 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 
+    DEBUG("finished spawning jobs");
+    DEBUG("waiting for job threads: " << runner_state.pending_threads.size());
+    for (auto &th: runner_state.pending_threads) {
+        th->join();
+        delete th;
+    }
     DEBUG("SHUTDOWN");
     shutdown = true;
     DEBUG("waiting for resolve thread");
@@ -393,18 +398,13 @@ void build(BuildRules &build_rules, const std::vector<std::string> &targets)
     DEBUG("waiting for runner threads");
     for (auto &th : runners) {
         while (!th.shutting_down) {
-            TIMEIT(std::unique_lock<std::mutex> lck(th.mutex));
             th.cv.notify_all();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         DEBUG("waiting for thread");
         th.thread->join();
         delete th.thread;
         th.thread = nullptr;
-    }
-    DEBUG("waiting for job threads: " << runner_state.pending_threads.size());
-    for (auto &th: runner_state.pending_threads) {
-        th->join();
-        delete th;
     }
     PRINT("Build successful");
 }

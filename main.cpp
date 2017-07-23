@@ -237,21 +237,26 @@ static bool run_job(const BuildRule &rule,
     DEBUG("Done: '" << rule.to_string() << "'");
 
     TIMEIT(lck.lock());
-    auto found_job = runner_state.active_jobs.find(rule);
-    ASSERT(found_job != runner_state.active_jobs.end());
-    runner_state.done_jobs.push_back(found_job->second);
-    auto erased_count = runner_state.active_jobs.erase(rule);
-    ASSERT(1 == erased_count);
-    DEBUG("Done job: " << found_job->second);
-    runner_state.outcomes[rule] = Outcome();
+    DEBUG("Done job: " << job);
+    runner_state.outcomes[rule] = Outcome(); // TODO
+    {
+        auto found_job = runner_state.active_jobs.find(rule);
+        ASSERT(found_job != runner_state.active_jobs.end());
+        ASSERT(found_job->second == job);
+        runner_state.done_jobs.push_back(found_job->second);
+        auto erased_count = runner_state.active_jobs.erase(rule);
+        ASSERT(1 == erased_count);
+    }
 
     auto cbs = runner_state.pending_cbs.find(rule);
     if (cbs != runner_state.pending_cbs.end()) {
-        for (auto cb : (*cbs->second)) {
+        auto cbs_list = cbs->second;
+        runner_state.pending_cbs.erase(rule);
+        lck.unlock();
+        for (auto cb : *cbs_list) {
             (*cb)(rule.outputs.front(), Optional<BuildRule>(rule));
         }
-        delete cbs->second;
-        runner_state.pending_cbs.erase(rule);
+        delete cbs_list;
     }
 
     return true;

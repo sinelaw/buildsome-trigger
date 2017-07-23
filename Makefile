@@ -14,7 +14,7 @@ GPP=g++ -no-pie
 GCC=gcc -no-pie
 CLANGPP=clang++
 
-CXX=${GPP} -fsanitize=address -g -g3 -fno-inline -O0 ${WARNINGS} -std=c++11 -pthread  -msse4.2
+CXX=${GPP} -g -g3 -fno-inline -O0 ${WARNINGS} -std=c++11 -pthread  -msse4.2
 CC=${GCC} -g ${WARNINGS} -std=gnu11
 
 $./out:
@@ -27,12 +27,12 @@ $./out/fs_override.so:
 	${CC} -o "$@" -Winit-self -shared -fPIC -D_GNU_SOURCE fshook/*.c -ldl
 
 $./out/test_fs_tree: $./test_fs_tree.cpp $./out/fs_tree.o $./out/debug.o
-	${CXX} -lasan $^ -lbsd -lleveldb -o "$@"
+	${CXX} $^ -lbsd -lleveldb -o "$@"
 
 $./out/test_build_rules: $./test_build_rules.cpp $./out/build_rules.o $./out/debug.o
 	${CXX} $^  -o "$@"
 
 $./out/main: $./out/main.o $./out/build_rules.o $./out/job.o $./out/debug.o
-	${CXX} -lasan $^ -lbsd -lleveldb  -o "$@"
+	${CXX} $^ -lbsd -lleveldb  -o "$@"
 
 local }
